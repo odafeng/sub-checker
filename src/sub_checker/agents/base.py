@@ -76,6 +76,13 @@ class BaseCheckerAgent(ABC):
             f"and {len(manuscript.paragraphs)} paragraphs."
         )
         parts.append("Use the provided tools to read the manuscript and report any findings.")
+        if config.output_lang == "zh-TW":
+            parts.append(
+                "\nIMPORTANT: Write ALL your findings (message, suggestion) in Traditional Chinese (繁體中文). "
+                "The manuscript itself is in English, but your output in add_finding must be in 繁體中文. "
+                "Example: message='引用 [15] 在文中被引用但參考文獻列表中缺失', "
+                "suggestion='請在參考文獻列表中新增 [15] 或修正引用編號'"
+            )
         return "\n".join(parts)
 
     def _handle_add_finding(self, tool_input: dict) -> str:

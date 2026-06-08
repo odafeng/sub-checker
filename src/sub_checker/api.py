@@ -169,7 +169,7 @@ async def websocket_check(websocket: WebSocket, session_id: str) -> None:
         run_data = _active_runs[session_id]
         manuscript: Manuscript = run_data["manuscript"]
 
-        config = Config()
+        config = Config(output_lang=lang)
         if journal:
             config.journal = journal
 

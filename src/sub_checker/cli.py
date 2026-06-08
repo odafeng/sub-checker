@@ -134,6 +134,7 @@ def main(
     config = load_config(cfg_path if cfg_path.exists() else None)
     if journal:
         config.journal = journal
+    config.output_lang = lang
 
     # Parse manuscript
     ms_path = Path(manuscript_path)
