@@ -1,0 +1,23 @@
+@import "tailwindcss";
+
+:root {
+  --bg: #0f1117;
+  --surface: #1a1d27;
+  --surface2: #232733;
+  --border: #2e3348;
+  --accent: #7c6ef0;
+  --error: #f05365;
+  --warning: #f0a73a;
+  --info: #5eb5f7;
+  --success: #4ade80;
+}
+
+body {
+  font-family: "Inter", system-ui, sans-serif;
+  background: var(--bg);
+  color: #e1e4ed;
+}
+
+.font-mono {
+  font-family: "JetBrains Mono", monospace;
+}
