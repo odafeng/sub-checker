@@ -27,6 +27,9 @@ class Config(BaseModel):
     journal: str | None = None
     model: str = "claude-sonnet-4-20250514"
     output_lang: str = "en"  # "en" or "zh-TW" — language for agent findings output
+    cot_dir: str | None = (
+        None  # COT log directory. None = default (~/.sub-checker/cot). "disabled" = no COT.
+    )
     figures: FigureConfig = Field(default_factory=FigureConfig)
     claim: ClaimConfig = Field(default_factory=ClaimConfig)
     custom_dictionary: list[str] = Field(default_factory=list)

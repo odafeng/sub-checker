@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import contextlib
 import json
 import os
@@ -15,10 +14,10 @@ from fastapi import FastAPI, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 
-from sub_checker.agents.base import BaseCheckerAgent
 from sub_checker.config import Config
 from sub_checker.i18n import checker_display_name
-from sub_checker.models import CheckerResult, Finding, Manuscript, Report, Severity
+from sub_checker.models import Manuscript, Report
+from sub_checker.orchestrator import build_report, create_agents, filter_agents, run_all_phases
 from sub_checker.parsers.docx_parser import parse_docx
 from sub_checker.reporters.html_reporter import format_html
 from sub_checker.reporters.json_reporter import format_json
@@ -49,29 +48,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Store active runs for WebSocket progress
+# Store active runs for WebSocket progress and completed reports
 _active_runs: dict[str, dict[str, Any]] = {}
-
-
-def _create_agents(config: Config) -> list[BaseCheckerAgent]:
-    from sub_checker.agents.citation_claim import CitationClaimAgent
-    from sub_checker.agents.citation_exist import CitationExistAgent
-    from sub_checker.agents.citation_format import CitationFormatAgent
-    from sub_checker.agents.figure_table import FigureTableAgent
-    from sub_checker.agents.journal_guidelines import JournalGuidelinesAgent
-    from sub_checker.agents.logic import LogicAgent
-    from sub_checker.agents.typo_grammar import TypoGrammarAgent
-
-    model = config.model
-    return [
-        TypoGrammarAgent(model=model),
-        FigureTableAgent(model=model),
-        CitationExistAgent(model=model),
-        CitationFormatAgent(model=model),
-        JournalGuidelinesAgent(model=model),
-        LogicAgent(model=model),
-        CitationClaimAgent(model=model),
-    ]
 
 
 ALL_CHECKERS = [
@@ -120,35 +98,6 @@ async def upload_manuscript(file: UploadFile) -> dict:
     }
 
 
-async def _run_agent_with_progress(
-    agent: BaseCheckerAgent,
-    manuscript: Manuscript,
-    config: Config,
-    ws: WebSocket,
-) -> CheckerResult:
-    """Run agent and send progress updates via WebSocket."""
-    await ws.send_json({"type": "agent_start", "agent": agent.name})
-    try:
-        result = await agent.run(manuscript, config)
-        await ws.send_json(
-            {
-                "type": "agent_done",
-                "agent": agent.name,
-                "findings_count": len(result.findings),
-                "elapsed": round(result.elapsed_seconds, 1),
-            }
-        )
-        return result
-    except Exception as e:
-        await ws.send_json({"type": "agent_error", "agent": agent.name, "error": str(e)})
-        return CheckerResult(
-            checker_name=agent.name,
-            findings=[
-                Finding(checker=agent.name, severity=Severity.ERROR, message=f"Agent crashed: {e}")
-            ],
-        )
-
-
 @app.websocket("/ws/check/{session_id}")
 async def websocket_check(websocket: WebSocket, session_id: str) -> None:
     """WebSocket endpoint for running checks with real-time progress."""
@@ -160,7 +109,6 @@ async def websocket_check(websocket: WebSocket, session_id: str) -> None:
         return
 
     try:
-        # Receive configuration from client
         config_msg = await websocket.receive_json()
         journal = config_msg.get("journal", "")
         selected = set(config_msg.get("checkers", []))
@@ -173,78 +121,28 @@ async def websocket_check(websocket: WebSocket, session_id: str) -> None:
         if journal:
             config.journal = journal
 
-        # Create and filter agents
-        agents = _create_agents(config)
-        if selected:
-            agents = [a for a in agents if a.name in selected]
+        agents = filter_agents(create_agents(config), only=selected or None)
 
         await websocket.send_json(
-            {
-                "type": "run_start",
-                "total_agents": len(agents),
-                "agents": [a.name for a in agents],
-            }
+            {"type": "run_start", "total_agents": len(agents), "agents": [a.name for a in agents]}
         )
 
-        # Phase execution
-        phase_groups = [
-            {"typo_grammar", "figure_table", "citation_exist"},
-            {"citation_format", "journal_guidelines", "logic"},
-            {"citation_claim"},
-        ]
+        # Progress callback → WebSocket
+        async def on_progress(event: str, agent_name: str, data: dict[str, Any]) -> None:
+            await websocket.send_json({"type": event, "agent": agent_name, **data})
 
-        from datetime import UTC, datetime
+        results = await run_all_phases(agents, manuscript, config, on_progress)
+        report = build_report(results, run_data["docx_path"], config.journal)
 
-        results: list[CheckerResult] = []
-        for phase_num, phase_names in enumerate(phase_groups, 1):
-            phase_agents = [a for a in agents if a.name in phase_names]
-            if not phase_agents:
-                continue
+        # Store report for later retrieval via REST endpoint
+        _active_runs[session_id]["report"] = report
 
-            await websocket.send_json(
-                {
-                    "type": "phase_start",
-                    "phase": phase_num,
-                    "agents": [a.name for a in phase_agents],
-                }
-            )
-
-            phase_results = await asyncio.gather(
-                *[_run_agent_with_progress(a, manuscript, config, websocket) for a in phase_agents]
-            )
-            results.extend(phase_results)
-
-        # Build report
-        summary: dict[Severity, int] = {s: 0 for s in Severity}
-        total_cost = 0.0
-        for r in results:
-            for f in r.findings:
-                summary[f.severity] = summary.get(f.severity, 0) + 1
-            total_cost += (
-                r.token_usage.input_tokens * 3 + r.token_usage.output_tokens * 15
-            ) / 1_000_000
-
-        report = Report(
-            manuscript_path=run_data["docx_path"],
-            timestamp=datetime.now(UTC),
-            target_journal=config.journal,
-            results=results,
-            summary=summary,
-            total_cost=total_cost,
-        )
-
-        # Send final report
         report_json = json.loads(format_json(report))
-        # Add localized checker names
         for r in report_json["results"]:
             r["display_name"] = checker_display_name(r["checker"], lang)
 
         await websocket.send_json(
-            {
-                "type": "report",
-                "data": report_json,
-                "html": format_html(report, lang=lang),
-            }
+            {"type": "report", "data": report_json, "html": format_html(report, lang=lang)}
         )
 
     except WebSocketDisconnect:
@@ -257,7 +155,8 @@ async def websocket_check(websocket: WebSocket, session_id: str) -> None:
 @app.get("/api/report/{session_id}/html")
 async def get_html_report(session_id: str, lang: str = "en") -> HTMLResponse:
     """Get the HTML report for a completed session."""
-    if session_id not in _active_runs or "report" not in _active_runs.get(session_id, {}):
+    run_data = _active_runs.get(session_id, {})
+    if "report" not in run_data:
         return HTMLResponse("<h1>Report not found</h1>", status_code=404)
-    report = _active_runs[session_id]["report"]
+    report: Report = run_data["report"]
     return HTMLResponse(format_html(report, lang=lang))

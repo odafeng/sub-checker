@@ -15,7 +15,7 @@ from tests.mock_helpers import (
 @pytest.mark.asyncio
 async def test_citation_exist_finds_missing_reference(sample_manuscript: Manuscript):
     """Agent should detect a citation with no matching reference."""
-    config = Config()
+    config = Config(cot_dir="disabled")
     agent = CitationExistAgent()
 
     # Simulate: read_section(Introduction) → get_reference_list → add_finding for mismatch
@@ -47,7 +47,7 @@ async def test_citation_exist_finds_missing_reference(sample_manuscript: Manuscr
 @pytest.mark.asyncio
 async def test_citation_exist_all_match(sample_manuscript: Manuscript):
     """No findings when all citations match references."""
-    config = Config()
+    config = Config(cot_dir="disabled")
     agent = CitationExistAgent()
 
     responses = [

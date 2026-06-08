@@ -111,7 +111,16 @@ class BaseCheckerAgent(ABC):
         start = time.monotonic()
 
         run_id = uuid.uuid4().hex[:8]
-        cot = AgentCOTLogger(agent_name=self.name, run_id=run_id)
+        cot_dir = None  # default
+        if config.cot_dir == "disabled":
+            cot_dir = None
+        elif config.cot_dir:
+            cot_dir = Path(config.cot_dir)
+        cot = AgentCOTLogger(
+            agent_name=self.name,
+            run_id=run_id,
+            cot_dir=cot_dir if config.cot_dir != "disabled" else None,
+        )
         logger.info("Starting agent '%s' (run_id=%s)", self.name, run_id)
 
         client = anthropic.AsyncAnthropic()

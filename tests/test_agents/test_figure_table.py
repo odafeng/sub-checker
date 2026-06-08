@@ -15,7 +15,7 @@ from tests.mock_helpers import (
 @pytest.mark.asyncio
 async def test_figure_table_agent_finds_missing_figure(sample_manuscript: Manuscript):
     """Agent should detect Figure3.png missing from figures dir."""
-    config = Config()
+    config = Config(cot_dir="disabled")
     agent = FigureTableAgent()
 
     # Simulate agent: list_figures → check_file_exists(Figure3) → add_finding → done
@@ -56,7 +56,7 @@ async def test_figure_table_agent_finds_missing_figure(sample_manuscript: Manusc
 @pytest.mark.asyncio
 async def test_figure_table_agent_no_issues(sample_manuscript: Manuscript):
     """Agent reports no issues when all figures exist."""
-    config = Config()
+    config = Config(cot_dir="disabled")
     agent = FigureTableAgent()
 
     responses = [

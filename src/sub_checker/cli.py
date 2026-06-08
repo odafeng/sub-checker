@@ -55,25 +55,10 @@ def _resolve_names(names: str | None) -> set[str] | None:
 
 
 def _create_agents(config: Config) -> list:
-    """Lazily import and instantiate all checker agents."""
-    from sub_checker.agents.citation_claim import CitationClaimAgent
-    from sub_checker.agents.citation_exist import CitationExistAgent
-    from sub_checker.agents.citation_format import CitationFormatAgent
-    from sub_checker.agents.figure_table import FigureTableAgent
-    from sub_checker.agents.journal_guidelines import JournalGuidelinesAgent
-    from sub_checker.agents.logic import LogicAgent
-    from sub_checker.agents.typo_grammar import TypoGrammarAgent
+    """Create all checker agents via shared orchestrator."""
+    from sub_checker.orchestrator import create_agents
 
-    model = config.model
-    return [
-        TypoGrammarAgent(model=model),
-        FigureTableAgent(model=model),
-        CitationExistAgent(model=model),
-        CitationFormatAgent(model=model),
-        JournalGuidelinesAgent(model=model),
-        LogicAgent(model=model),
-        CitationClaimAgent(model=model),
-    ]
+    return create_agents(config)
 
 
 @click.command()

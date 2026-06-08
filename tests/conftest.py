@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 from docx import Document
 
+from sub_checker.config import Config
 from sub_checker.models import Manuscript
 
 
@@ -106,3 +107,9 @@ def sample_manuscript(sample_docx: Path, sample_figures_dir: Path) -> Manuscript
     from sub_checker.parsers.docx_parser import parse_docx
 
     return parse_docx(sample_docx, sample_figures_dir)
+
+
+@pytest.fixture
+def test_config() -> Config:
+    """Config with COT logging disabled for test isolation."""
+    return Config(cot_dir="disabled")
