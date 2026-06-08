@@ -27,7 +27,8 @@ def parse_docx(docx_path: Path, figure_dir: Path | None = None) -> Manuscript:
         if not text:
             continue
 
-        style_name = (para.style.name or "").lower()
+        style = para.style
+        style_name = ((style.name or "") if style else "").lower()
         is_heading = "heading" in style_name
 
         if is_heading:

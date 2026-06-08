@@ -5,9 +5,10 @@ import time
 import uuid
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Any
+from typing import cast
 
 import anthropic
+from anthropic.types import MessageParam, ToolParam
 
 from sub_checker.config import Config
 from sub_checker.logging_config import AgentCOTLogger
@@ -102,10 +103,11 @@ class BaseCheckerAgent(ABC):
         logger.info("Starting agent '%s' (run_id=%s)", self.name, run_id)
 
         client = anthropic.AsyncAnthropic()
-        tools = self.get_tools()
-        messages: list[dict[str, Any]] = [
-            {"role": "user", "content": self._build_initial_message(manuscript, config)}
-        ]
+        tools = cast(list[ToolParam], self.get_tools())
+        messages = cast(
+            list[MessageParam],
+            [{"role": "user", "content": self._build_initial_message(manuscript, config)}],
+        )
 
         iteration = 0
         try:
@@ -124,7 +126,7 @@ class BaseCheckerAgent(ABC):
 
                 self._token_usage.input_tokens += response.usage.input_tokens
                 self._token_usage.output_tokens += response.usage.output_tokens
-                cot.log_response(response.stop_reason, response.content)
+                cot.log_response(str(response.stop_reason), response.content)
 
                 if response.stop_reason == "end_turn":
                     logger.debug("[%s] Agent finished (end_turn)", self.name)
@@ -138,9 +140,10 @@ class BaseCheckerAgent(ABC):
 
                         if block.name == "add_finding":
                             result = self._handle_add_finding(block.input)
+                            inp = block.input
                             cot.log_finding(
-                                block.input.get("severity", "warning"),
-                                block.input.get("message", ""),
+                                str(inp.get("severity", "warning")),
+                                str(inp.get("message", "")),
                             )
                         else:
                             try:
@@ -165,8 +168,10 @@ class BaseCheckerAgent(ABC):
                     logger.debug("[%s] No tool results, ending loop", self.name)
                     break
 
-                messages.append({"role": "assistant", "content": response.content})
-                messages.append({"role": "user", "content": tool_results})
+                messages.append(
+                    cast(MessageParam, {"role": "assistant", "content": response.content})
+                )
+                messages.append(cast(MessageParam, {"role": "user", "content": tool_results}))
 
         except Exception as e:
             logger.error("[%s] Agent failed: %s", self.name, e, exc_info=True)
