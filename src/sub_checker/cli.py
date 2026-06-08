@@ -87,7 +87,7 @@ def _create_agents(config: Config) -> list:
     "--output",
     "output_format",
     default="terminal",
-    type=click.Choice(["terminal", "json", "markdown"]),
+    type=click.Choice(["terminal", "json", "markdown", "html"]),
 )
 @click.option("--output-file", default=None, type=click.Path(), help="Write report to file")
 @click.option(
@@ -196,6 +196,13 @@ def main(
             Path(output_file).write_text(text)
         else:
             console.print(text)
+    elif output_format == "html":
+        from sub_checker.reporters.html_reporter import format_html
+
+        text = format_html(report)
+        out = Path(output_file) if output_file else Path("sub-check-report.html")
+        out.write_text(text)
+        console.print(f"[green]HTML report saved to {out}[/green]")
 
     # Exit code based on errors
     error_count = report.summary.get(Severity.ERROR, 0)
