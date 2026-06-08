@@ -119,11 +119,18 @@ def main(
         if not docx_files:
             console.print("[red]No .docx file found in directory.[/red]")
             raise SystemExit(1)
-        docx_path = docx_files[0]
+        # Prefer files with "manuscript" in the name
+        manuscript_files = [f for f in docx_files if "manuscript" in f.name.lower()]
+        docx_path = manuscript_files[0] if manuscript_files else docx_files[0]
         figure_dir = ms_path / config.figures.dir
+        # Fall back to the directory itself if no figures/ subdir
+        if not figure_dir.exists():
+            figure_dir = ms_path
     else:
         docx_path = ms_path
         figure_dir = ms_path.parent / config.figures.dir
+        if not figure_dir.exists():
+            figure_dir = ms_path.parent
 
     console.print(f"Parsing [bold]{docx_path.name}[/bold]...")
     manuscript = parse_docx(docx_path, figure_dir if figure_dir.exists() else None)

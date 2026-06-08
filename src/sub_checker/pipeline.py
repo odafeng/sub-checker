@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from datetime import UTC, datetime
 
 from rich.console import Console
@@ -8,7 +9,9 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from sub_checker.agents.base import BaseCheckerAgent
 from sub_checker.config import Config
-from sub_checker.models import CheckerResult, Manuscript, Report, Severity
+from sub_checker.models import CheckerResult, Finding, Manuscript, Report, Severity
+
+logger = logging.getLogger("sub_checker.pipeline")
 
 
 async def _run_agent(
@@ -18,14 +21,30 @@ async def _run_agent(
     console: Console,
     verbose: bool = False,
 ) -> CheckerResult:
-    """Run a single agent and print status."""
+    """Run a single agent, catching errors so other agents can continue."""
     if verbose:
         console.print(f"  [dim]Starting {agent.name} agent...[/dim]")
-    result = await agent.run(manuscript, config)
-    n = len(result.findings)
-    if verbose:
-        console.print(f"  [dim]{agent.name}: {n} finding(s) in {result.elapsed_seconds:.1f}s[/dim]")
-    return result
+    try:
+        result = await agent.run(manuscript, config)
+        n = len(result.findings)
+        if verbose:
+            console.print(
+                f"  [dim]{agent.name}: {n} finding(s) in {result.elapsed_seconds:.1f}s[/dim]"
+            )
+        return result
+    except Exception as e:
+        logger.error("[%s] Agent crashed: %s", agent.name, e, exc_info=True)
+        console.print(f"  [bold red]{agent.name} failed: {e}[/bold red]")
+        return CheckerResult(
+            checker_name=agent.name,
+            findings=[
+                Finding(
+                    checker=agent.name,
+                    severity=Severity.ERROR,
+                    message=f"Agent crashed: {e}",
+                )
+            ],
+        )
 
 
 async def run_pipeline(
