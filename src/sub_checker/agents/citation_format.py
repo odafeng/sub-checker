@@ -1,0 +1,82 @@
+from __future__ import annotations
+
+from sub_checker.agents.base import ADD_FINDING_TOOL, BaseCheckerAgent
+from sub_checker.config import Config
+from sub_checker.models import Manuscript
+from sub_checker.services.web import WebService
+from sub_checker.tools.manuscript_tools import (
+    TOOL_GET_REFERENCE_LIST,
+    TOOL_READ_SECTION,
+    get_reference_list,
+    read_section,
+)
+from sub_checker.tools.web_tools import (
+    TOOL_FETCH_PAGE,
+    TOOL_WEB_SEARCH,
+    fetch_page,
+    web_search,
+)
+
+
+class CitationFormatAgent(BaseCheckerAgent):
+    name = "citation_format"
+
+    def __init__(self, model: str = "claude-sonnet-4-20250514"):
+        super().__init__(model=model)
+        self._manuscript: Manuscript | None = None
+        self._web_service: WebService | None = None
+
+    def _default_system_prompt(self) -> str:
+        return (
+            "You are a citation format expert. You know all major citation styles:\n"
+            "- APA 7th: (Author, Year) with Author, A. A. (Year). Title. Journal, vol(issue), pp. DOI\n"
+            "- Vancouver/NLM: numbered [1] or superscript, Author AA. Title. Journal. Year;vol(issue):pp.\n"
+            "- AMA 11th: superscript numbers, Author AA. Title. Journal. Year;vol(issue):pp. doi:\n"
+            '- Chicago Author-Date: (Author Year), Author, First. Year. "Title." Journal vol(issue): pp.\n'
+            '- IEEE: [1], A. Author, "Title," Journal, vol. X, no. Y, pp., Year.\n'
+            "- Harvard: (Author Year), Author, A. (Year) Title. Journal, vol(issue), pp.\n\n"
+            "Your job is to:\n"
+            "1. Determine the target journal's required citation format\n"
+            "   - Use your built-in knowledge first\n"
+            "   - If unsure, use web_search to find the journal's author guidelines\n"
+            "   - Use fetch_page to read the guidelines page\n"
+            "2. Check EVERY in-text citation against the required format\n"
+            "3. Check EVERY reference list entry against the required format\n"
+            "4. Check consistency (all entries should follow the same style)\n"
+            "5. Check: author name format, punctuation, DOI/PMID inclusion, ordering\n\n"
+            "Use add_finding for each format violation."
+        )
+
+    def get_tools(self) -> list[dict]:
+        return [
+            TOOL_READ_SECTION,
+            TOOL_GET_REFERENCE_LIST,
+            TOOL_WEB_SEARCH,
+            TOOL_FETCH_PAGE,
+            ADD_FINDING_TOOL,
+        ]
+
+    async def handle_tool_call(self, tool_name: str, tool_input: dict) -> str:
+        ms = self._manuscript
+        assert ms is not None
+        if tool_name == "read_section":
+            return read_section(ms, tool_input["section_name"])
+        if tool_name == "get_reference_list":
+            return get_reference_list(ms)
+        if tool_name == "web_search":
+            ws = self._web_service or WebService()
+            self._web_service = ws
+            return await web_search(ws, tool_input["query"])
+        if tool_name == "fetch_page":
+            ws = self._web_service or WebService()
+            self._web_service = ws
+            return await fetch_page(ws, tool_input["url"])
+        return f"Unknown tool: {tool_name}"
+
+    async def run(self, manuscript: Manuscript, config: Config):
+        self._manuscript = manuscript
+        try:
+            return await super().run(manuscript, config)
+        finally:
+            if self._web_service:
+                await self._web_service.close()

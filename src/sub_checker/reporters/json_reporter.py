@@ -1,0 +1,42 @@
+"""JSON reporter."""
+
+from __future__ import annotations
+
+import json
+from typing import Any
+
+from sub_checker.models import Report
+
+
+def format_json(report: Report) -> str:
+    data: dict[str, Any] = {
+        "manuscript_path": report.manuscript_path,
+        "timestamp": report.timestamp.isoformat(),
+        "target_journal": report.target_journal,
+        "total_cost": report.total_cost,
+        "summary": {s.value: c for s, c in report.summary.items()},
+        "results": [],
+    }
+
+    for r in report.results:
+        result_data: dict[str, Any] = {
+            "checker": r.checker_name,
+            "elapsed_seconds": r.elapsed_seconds,
+            "token_usage": {
+                "input_tokens": r.token_usage.input_tokens,
+                "output_tokens": r.token_usage.output_tokens,
+            },
+            "findings": [
+                {
+                    "severity": f.severity.value,
+                    "message": f.message,
+                    "location": f.location,
+                    "suggestion": f.suggestion,
+                    "context": f.context,
+                }
+                for f in r.findings
+            ],
+        }
+        data["results"].append(result_data)
+
+    return json.dumps(data, indent=2, ensure_ascii=False)
