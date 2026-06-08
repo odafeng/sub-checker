@@ -39,3 +39,6 @@ Thumbs.db
 # Pyright
 pyrightconfig.json
 .env
+dist/
+build/
+*.egg-info/

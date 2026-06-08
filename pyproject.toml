@@ -7,7 +7,32 @@ name = "sub-checker"
 version = "0.1.0"
 description = "Pre-submission manuscript checker powered by Claude agents"
 readme = "README.md"
+license = "MIT"
 requires-python = ">=3.11"
+authors = [
+    { name = "odafeng" },
+]
+keywords = [
+    "academic",
+    "manuscript",
+    "submission",
+    "checker",
+    "agent",
+    "claude",
+    "proofreading",
+    "citation",
+    "journal",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Text Processing :: Linguistic",
+]
 dependencies = [
     "click>=8.0",
     "python-docx>=1.0",
@@ -27,6 +52,11 @@ dev = [
     "pyright>=1.1",
     "pre-commit>=4.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/odafeng/sub-checker"
+Repository = "https://github.com/odafeng/sub-checker"
+Issues = "https://github.com/odafeng/sub-checker/issues"
 
 [project.scripts]
 sub-check = "sub_checker.cli:main"
