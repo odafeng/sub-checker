@@ -1,3 +1,6 @@
+# Secrets
+.env
+
 # Python
 __pycache__/
 *.py[cod]
@@ -35,3 +38,4 @@ Thumbs.db
 
 # Pyright
 pyrightconfig.json
+.env

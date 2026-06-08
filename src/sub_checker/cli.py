@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from pathlib import Path
 
 import click
@@ -11,6 +12,20 @@ from sub_checker.logging_config import setup_logging
 from sub_checker.models import Severity
 from sub_checker.parsers.docx_parser import parse_docx
 from sub_checker.pipeline import run_pipeline
+
+
+def _load_dotenv() -> None:
+    """Load .env file from CWD or project root if it exists."""
+    for candidate in [Path.cwd() / ".env", Path(__file__).parent.parent.parent / ".env"]:
+        if candidate.exists():
+            for line in candidate.read_text().splitlines():
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, _, value = line.partition("=")
+                os.environ.setdefault(key.strip(), value.strip())
+            break
+
 
 ALL_CHECKER_NAMES = ["typo", "logic", "figure", "citation", "format", "guidelines", "claim"]
 
@@ -95,6 +110,7 @@ def main(
     do_init: bool,
 ) -> None:
     """Check a manuscript before journal submission."""
+    _load_dotenv()
     console = Console()
 
     # Initialize logging

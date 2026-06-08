@@ -4,6 +4,7 @@ import logging
 import time
 import uuid
 from abc import ABC, abstractmethod
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
 
@@ -63,7 +64,11 @@ class BaseCheckerAgent(ABC):
 
     def _build_initial_message(self, manuscript: Manuscript, config: Config) -> str:
         """Build the initial user message with task context."""
-        parts = [f'Please check the following manuscript: "{manuscript.title}"']
+        today = datetime.now(UTC).strftime("%Y-%m-%d")
+        parts = [
+            f"Today's date: {today}",
+            f'Please check the following manuscript: "{manuscript.title}"',
+        ]
         if config.journal:
             parts.append(f"Target journal: {config.journal}")
         parts.append(
