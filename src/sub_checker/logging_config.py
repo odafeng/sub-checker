@@ -73,7 +73,7 @@ class AgentCOTLogger:
         self._entries: list[dict[str, Any]] = []
         self._logger = logging.getLogger(f"sub_checker.agent.{agent_name}")
 
-    def log_request(self, messages: list, tools: list[dict]) -> None:
+    def log_request(self, messages: list, tools: list) -> None:
         """Log the API request (messages + tools)."""
         entry = {
             "type": "api_request",
