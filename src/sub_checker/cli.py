@@ -97,6 +97,12 @@ def _create_agents(config: Config) -> list:
 @click.option("-v", "--verbose", is_flag=True, help="Show agent tool calls")
 @click.option("--dry-run", is_flag=True, help="Only parse .docx, don't run agents")
 @click.option("--init", "do_init", is_flag=True, help="Generate default .sub-checker.yaml")
+@click.option(
+    "--lang",
+    default="en",
+    type=click.Choice(["en", "zh-TW"]),
+    help="Report language (en or zh-TW)",
+)
 def main(
     manuscript_path: str,
     journal: str | None,
@@ -108,6 +114,7 @@ def main(
     verbose: bool,
     dry_run: bool,
     do_init: bool,
+    lang: str,
 ) -> None:
     """Check a manuscript before journal submission."""
     _load_dotenv()
@@ -179,7 +186,7 @@ def main(
     if output_format == "terminal":
         from sub_checker.reporters.terminal import print_report
 
-        print_report(report, console)
+        print_report(report, console, lang=lang)
     elif output_format == "json":
         from sub_checker.reporters.json_reporter import format_json
 
@@ -191,7 +198,7 @@ def main(
     elif output_format == "markdown":
         from sub_checker.reporters.markdown_reporter import format_markdown
 
-        text = format_markdown(report)
+        text = format_markdown(report, lang=lang)
         if output_file:
             Path(output_file).write_text(text)
         else:
@@ -199,7 +206,7 @@ def main(
     elif output_format == "html":
         from sub_checker.reporters.html_reporter import format_html
 
-        text = format_html(report)
+        text = format_html(report, lang=lang)
         out = Path(output_file) if output_file else Path("sub-check-report.html")
         out.write_text(text)
         console.print(f"[green]HTML report saved to {out}[/green]")
