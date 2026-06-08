@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import os
 import tempfile
 import uuid
 from pathlib import Path
@@ -21,6 +22,22 @@ from sub_checker.models import CheckerResult, Finding, Manuscript, Report, Sever
 from sub_checker.parsers.docx_parser import parse_docx
 from sub_checker.reporters.html_reporter import format_html
 from sub_checker.reporters.json_reporter import format_json
+
+
+def _load_dotenv() -> None:
+    """Load .env from CWD or project root."""
+    for candidate in [Path.cwd() / ".env", Path(__file__).parent.parent.parent / ".env"]:
+        if candidate.exists():
+            for line in candidate.read_text().splitlines():
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, _, value = line.partition("=")
+                os.environ.setdefault(key.strip(), value.strip())
+            break
+
+
+_load_dotenv()
 
 app = FastAPI(title="Sub-Checker API", version="0.1.0")
 

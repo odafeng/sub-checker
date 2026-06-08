@@ -88,6 +88,9 @@ ignore = [
     "E501",   # line too long (handled by formatter)
 ]
 
+[tool.ruff.lint.per-file-ignores]
+"src/sub_checker/api.py" = ["E402"]  # _load_dotenv() must run before imports
+
 [tool.ruff.lint.isort]
 known-first-party = ["sub_checker"]
 
