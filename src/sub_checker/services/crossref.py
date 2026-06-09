@@ -1,13 +1,24 @@
-"""Crossref API client for DOI-based citation verification."""
+"""Crossref API client for DOI-based citation verification.
+
+Polite pool rate: ~50 req/sec with mailto in User-Agent.
+Retries on 429/5xx with exponential backoff.
+"""
 
 from __future__ import annotations
 
 import asyncio
+import logging
+import time
 from typing import Any
 
 import httpx
 
 CROSSREF_WORKS_URL = "https://api.crossref.org/works"
+
+logger = logging.getLogger("sub_checker.services.crossref")
+
+_MAX_RETRIES = 3
+_RETRY_BACKOFF = (1.0, 3.0, 8.0)
 
 
 class CrossrefClient:
@@ -15,6 +26,9 @@ class CrossrefClient:
         self._semaphore = asyncio.Semaphore(max_concurrent)
         self._cache: dict[str, dict[str, Any] | None] = {}
         self._client: httpx.AsyncClient | None = None
+        self._min_interval = 0.25
+        self._last_request_time = 0.0
+        self._rate_lock = asyncio.Lock()
 
     async def _get_client(self) -> httpx.AsyncClient:
         if self._client is None:
@@ -26,6 +40,31 @@ class CrossrefClient:
             )
         return self._client
 
+    async def _rate_limited_get(
+        self, url: str, params: dict[str, str] | None = None
+    ) -> httpx.Response:
+        """GET with rate limiting and retry."""
+        client = await self._get_client()
+        for attempt in range(_MAX_RETRIES):
+            async with self._rate_lock:
+                now = time.monotonic()
+                wait = self._min_interval - (now - self._last_request_time)
+                if wait > 0:
+                    await asyncio.sleep(wait)
+                self._last_request_time = time.monotonic()
+
+            async with self._semaphore:
+                resp = await client.get(url, params=params)
+                if resp.status_code == 429 or resp.status_code >= 500:
+                    backoff = _RETRY_BACKOFF[min(attempt, len(_RETRY_BACKOFF) - 1)]
+                    logger.warning("Crossref %d, retry in %.1fs", resp.status_code, backoff)
+                    await asyncio.sleep(backoff)
+                    continue
+                resp.raise_for_status()
+                return resp
+
+        raise httpx.HTTPError("Max retries exceeded")  # type: ignore[call-arg]
+
     async def search(
         self, author: str, title_keywords: str, year: str = "", max_results: int = 3
     ) -> list[dict[str, Any]]:
@@ -35,20 +74,17 @@ class CrossrefClient:
         if cache_key in self._cache:
             return self._cache[cache_key] or []  # type: ignore[return-value]
 
-        async with self._semaphore:
-            client = await self._get_client()
-            params: dict[str, str] = {
-                "query": query,
-                "rows": str(max_results),
-                "select": "DOI,title,author,published-print,published-online,container-title,abstract",
-            }
-            if year:
-                params["filter"] = f"from-pub-date:{year},until-pub-date:{year}"
-            try:
-                resp = await client.get(CROSSREF_WORKS_URL, params=params)
-                resp.raise_for_status()
-            except httpx.HTTPError:
-                return []
+        params: dict[str, str] = {
+            "query": query,
+            "rows": str(max_results),
+            "select": "DOI,title,author,published-print,published-online,container-title,abstract",
+        }
+        if year:
+            params["filter"] = f"from-pub-date:{year},until-pub-date:{year}"
+        try:
+            resp = await self._rate_limited_get(CROSSREF_WORKS_URL, params)
+        except httpx.HTTPError:
+            return []
 
         data = resp.json()
         items = data.get("message", {}).get("items", [])
@@ -83,19 +119,16 @@ class CrossrefClient:
         if cache_key in self._cache:
             return self._cache[cache_key]
 
-        async with self._semaphore:
-            client = await self._get_client()
-            try:
-                resp = await client.get(
-                    f"{CROSSREF_WORKS_URL}/{doi}",
-                    params={
-                        "select": "DOI,title,author,published-print,published-online,container-title,abstract"
-                    },
-                )
-                resp.raise_for_status()
-            except httpx.HTTPError:
-                self._cache[cache_key] = None
-                return None
+        try:
+            resp = await self._rate_limited_get(
+                f"{CROSSREF_WORKS_URL}/{doi}",
+                params={
+                    "select": "DOI,title,author,published-print,published-online,container-title,abstract"
+                },
+            )
+        except httpx.HTTPError:
+            self._cache[cache_key] = None
+            return None
 
         item = resp.json().get("message", {})
         authors = []

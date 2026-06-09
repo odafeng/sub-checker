@@ -1,8 +1,14 @@
-"""Semantic Scholar API client — fallback for papers not found on PubMed."""
+"""Semantic Scholar API client — fallback for papers not found on PubMed.
+
+Rate limit: ~100 req/sec for unauthenticated, but practically 1 req/sec is safe.
+Retries on 429/5xx with exponential backoff.
+"""
 
 from __future__ import annotations
 
 import asyncio
+import logging
+import time
 from typing import Any
 
 import httpx
@@ -10,12 +16,20 @@ import httpx
 S2_SEARCH_URL = "https://api.semanticscholar.org/graph/v1/paper/search"
 S2_PAPER_URL = "https://api.semanticscholar.org/graph/v1/paper"
 
+logger = logging.getLogger("sub_checker.services.semantic_scholar")
+
+_MAX_RETRIES = 3
+_RETRY_BACKOFF = (1.0, 3.0, 8.0)
+
 
 class SemanticScholarClient:
     def __init__(self, max_concurrent: int = 3):
         self._semaphore = asyncio.Semaphore(max_concurrent)
         self._cache: dict[str, dict[str, Any]] = {}
         self._client: httpx.AsyncClient | None = None
+        self._min_interval = 0.35
+        self._last_request_time = 0.0
+        self._rate_lock = asyncio.Lock()
 
     async def _get_client(self) -> httpx.AsyncClient:
         if self._client is None:
@@ -25,28 +39,50 @@ class SemanticScholarClient:
             )
         return self._client
 
+    async def _rate_limited_get(
+        self, url: str, params: dict[str, str] | None = None
+    ) -> httpx.Response:
+        """GET with rate limiting and retry."""
+        client = await self._get_client()
+        for attempt in range(_MAX_RETRIES):
+            async with self._rate_lock:
+                now = time.monotonic()
+                wait = self._min_interval - (now - self._last_request_time)
+                if wait > 0:
+                    await asyncio.sleep(wait)
+                self._last_request_time = time.monotonic()
+
+            async with self._semaphore:
+                resp = await client.get(url, params=params)
+                if resp.status_code == 429 or resp.status_code >= 500:
+                    backoff = _RETRY_BACKOFF[min(attempt, len(_RETRY_BACKOFF) - 1)]
+                    logger.warning("S2 %d, retry in %.1fs", resp.status_code, backoff)
+                    await asyncio.sleep(backoff)
+                    continue
+                resp.raise_for_status()
+                return resp
+
+        raise httpx.HTTPError("Max retries exceeded")  # type: ignore[call-arg]
+
     async def search(
         self, query: str, year: str = "", max_results: int = 5
     ) -> list[dict[str, Any]]:
-        """Search Semantic Scholar. Returns list of {paperId, title, year, authors, abstract}."""
+        """Search Semantic Scholar. Returns list of paper dicts."""
         cache_key = f"search:{query}:{year}"
         if cache_key in self._cache:
             return self._cache[cache_key].get("results", [])
 
-        async with self._semaphore:
-            client = await self._get_client()
-            params: dict[str, str] = {
-                "query": query,
-                "limit": str(max_results),
-                "fields": "title,year,authors,abstract,externalIds",
-            }
-            if year:
-                params["year"] = year
-            try:
-                resp = await client.get(S2_SEARCH_URL, params=params)
-                resp.raise_for_status()
-            except httpx.HTTPError:
-                return []
+        params: dict[str, str] = {
+            "query": query,
+            "limit": str(max_results),
+            "fields": "title,year,authors,abstract,externalIds",
+        }
+        if year:
+            params["year"] = year
+        try:
+            resp = await self._rate_limited_get(S2_SEARCH_URL, params)
+        except httpx.HTTPError:
+            return []
 
         data = resp.json()
         papers = data.get("data", [])
@@ -70,24 +106,18 @@ class SemanticScholarClient:
         return results
 
     async def get_paper(self, paper_id: str) -> dict[str, Any] | None:
-        """Get paper details by Semantic Scholar paper ID, DOI, or PMID.
-
-        Accepts: S2 paper ID, "DOI:10.xxx", "PMID:12345", "CorpusId:xxx"
-        """
+        """Get paper details by Semantic Scholar paper ID, DOI, or PMID."""
         cache_key = f"paper:{paper_id}"
         if cache_key in self._cache:
             return self._cache[cache_key]
 
-        async with self._semaphore:
-            client = await self._get_client()
-            try:
-                resp = await client.get(
-                    f"{S2_PAPER_URL}/{paper_id}",
-                    params={"fields": "title,year,authors,abstract,externalIds"},
-                )
-                resp.raise_for_status()
-            except httpx.HTTPError:
-                return None
+        try:
+            resp = await self._rate_limited_get(
+                f"{S2_PAPER_URL}/{paper_id}",
+                params={"fields": "title,year,authors,abstract,externalIds"},
+            )
+        except httpx.HTTPError:
+            return None
 
         data = resp.json()
         authors = [a.get("name", "") for a in (data.get("authors") or [])]
