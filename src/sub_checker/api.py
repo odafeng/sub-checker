@@ -5,7 +5,9 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import shutil
 import tempfile
+import time
 import uuid
 from pathlib import Path
 from typing import Any
@@ -50,6 +52,22 @@ app.add_middleware(
 
 # Store active runs for WebSocket progress and completed reports
 _active_runs: dict[str, dict[str, Any]] = {}
+_SESSION_TTL = 3600  # 1 hour
+
+
+def _cleanup_stale_sessions() -> None:
+    """Remove sessions older than TTL and their temp dirs."""
+    now = time.monotonic()
+    stale = [
+        sid
+        for sid, data in _active_runs.items()
+        if now - data.get("created_at", now) > _SESSION_TTL
+    ]
+    for sid in stale:
+        tmp_dir = _active_runs[sid].get("tmp_dir")
+        if tmp_dir:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+        del _active_runs[sid]
 
 
 ALL_CHECKERS = [
@@ -76,15 +94,23 @@ async def upload_manuscript(file: UploadFile) -> dict:
 
     session_id = uuid.uuid4().hex[:12]
     tmp_dir = Path(tempfile.mkdtemp(prefix=f"subcheck_{session_id}_"))
-    docx_path = tmp_dir / file.filename
+    # Sanitize filename: strip path components to prevent path traversal
+    safe_name = Path(file.filename).name
+    if not safe_name or "/" in safe_name or "\\" in safe_name:
+        return {"error": "Invalid filename"}
+    docx_path = tmp_dir / safe_name
+    if not docx_path.resolve().is_relative_to(tmp_dir.resolve()):
+        return {"error": "Invalid filename"}
     docx_path.write_bytes(await file.read())
 
     manuscript = parse_docx(docx_path, tmp_dir)
 
+    _cleanup_stale_sessions()
     _active_runs[session_id] = {
         "manuscript": manuscript,
         "docx_path": str(docx_path),
         "tmp_dir": str(tmp_dir),
+        "created_at": time.monotonic(),
     }
 
     return {

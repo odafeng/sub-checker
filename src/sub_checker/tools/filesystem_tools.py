@@ -19,7 +19,15 @@ def check_file_exists(manuscript: Manuscript, filename: str) -> str:
     """Check if a file exists in the figures directory."""
     if not manuscript.figure_dir:
         return f"No figures directory configured. Cannot check for '{filename}'."
-    path = manuscript.figure_dir / filename
+    # Sanitize: only allow basename, reject path traversal
+    from pathlib import PurePosixPath
+
+    safe_name = PurePosixPath(filename).name
+    if not safe_name or safe_name != filename.replace("\\", "/").split("/")[-1]:
+        return f"Invalid filename '{filename}'. Only simple filenames are allowed."
+    path = manuscript.figure_dir / safe_name
+    if not path.resolve().is_relative_to(manuscript.figure_dir.resolve()):
+        return f"Invalid filename '{filename}'."
     if path.exists():
         size = path.stat().st_size
         return f"File '{filename}' exists ({size} bytes)."

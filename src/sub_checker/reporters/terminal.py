@@ -46,7 +46,8 @@ def print_report(report: Report, console: Console | None = None, lang: str = "en
     # Findings by checker
     for result in report.results:
         display = checker_display_name(result.checker_name, lang)
-        if not result.findings:
+        active_findings = [f for f in result.findings if f.validation_status != "filtered"]
+        if not active_findings:
             console.print(f"[green]  {display}: {tr('no_issues')}[/green]")
             continue
 
@@ -56,7 +57,7 @@ def print_report(report: Report, console: Console | None = None, lang: str = "en
         table.add_column(tr("message"), ratio=2)
         table.add_column(tr("suggestion"), ratio=1)
 
-        for f in result.findings:
+        for f in active_findings:
             sev_label = tr(_SEVERITY_KEY[f.severity])
             styled = _SEVERITY_STYLE[f.severity].format(label=sev_label)
             table.add_row(

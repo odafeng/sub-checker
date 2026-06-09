@@ -54,7 +54,7 @@ def _extract_first_author(ref_text: str) -> str:
 
 def _extract_year(ref_text: str) -> str:
     """Extract publication year from reference text."""
-    years = re.findall(r"\b(19|20)\d{2}\b", ref_text)
+    years = re.findall(r"\b(?:19|20)\d{2}\b", ref_text)
     return years[-1] if years else ""
 
 

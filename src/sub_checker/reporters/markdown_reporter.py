@@ -31,7 +31,8 @@ def format_markdown(report: Report, lang: str = "en") -> str:
         lines.append(f"## {display} ({result.elapsed_seconds:.1f}s)")
         lines.append("")
 
-        if not result.findings:
+        active_findings = [f for f in result.findings if f.validation_status != "filtered"]
+        if not active_findings:
             lines.append(tr("no_issues"))
             lines.append("")
             continue
@@ -41,7 +42,7 @@ def format_markdown(report: Report, lang: str = "en") -> str:
         )
         lines.append("|----------|----------|---------|------------|")
 
-        for f in result.findings:
+        for f in active_findings:
             sev = tr(_SEVERITY_KEY[f.severity])
             loc = f.location or "—"
             sug = f.suggestion or "—"
