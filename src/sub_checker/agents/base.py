@@ -12,7 +12,7 @@ import anthropic
 from anthropic.types import MessageParam, ToolParam
 
 from sub_checker.config import Config
-from sub_checker.logging_config import AgentCOTLogger
+from sub_checker.logging_config import _DEFAULT_COT_DIR, AgentCOTLogger
 from sub_checker.models import (
     CheckerResult,
     Finding,
@@ -111,15 +111,16 @@ class BaseCheckerAgent(ABC):
         start = time.monotonic()
 
         run_id = uuid.uuid4().hex[:8]
-        cot_dir = None  # default
         if config.cot_dir == "disabled":
-            cot_dir = None
+            cot_dir = None  # explicitly disable COT file output
         elif config.cot_dir:
-            cot_dir = Path(config.cot_dir)
+            cot_dir = Path(config.cot_dir)  # custom directory
+        else:
+            cot_dir = _DEFAULT_COT_DIR  # None in config → use default
         cot = AgentCOTLogger(
             agent_name=self.name,
             run_id=run_id,
-            cot_dir=cot_dir if config.cot_dir != "disabled" else None,
+            cot_dir=cot_dir,
         )
         logger.info("Starting agent '%s' (run_id=%s)", self.name, run_id)
 

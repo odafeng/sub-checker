@@ -12,7 +12,7 @@ Pre-submission manuscript checker powered by Claude agents. Each check is perfor
 | **citation_format** | Reference list follows target journal's citation style (APA, Vancouver, AMA, etc.) |
 | **journal_guidelines** | Word count, required sections, abstract format, required statements (COI, ethics, data availability) |
 | **logic** | Contradictions, unsupported claims, methods-results mismatches |
-| **citation_claim** | Fetches cited paper abstracts from PubMed, verifies they support your claims |
+| **citation_claim** | Fetches cited paper abstracts from PubMed (with Semantic Scholar fallback), verifies they support your claims |
 
 ## Install
 
