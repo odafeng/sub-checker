@@ -2,7 +2,37 @@
 
 from __future__ import annotations
 
+import re
+
 from sub_checker.models import Manuscript
+
+
+def extract_citation_numbers(raw_text: str) -> set[int]:
+    """Deterministic extraction of all numbered citations from manuscript text.
+
+    Handles: (1), [1], (1-3), [1-3], (1,2,5), (1, 2, 5), etc.
+    Returns the set of all individual reference numbers found.
+    """
+    cited: set[int] = set()
+    # Match patterns like (1), [1], (1-3), [1,2,5], (1, 2, 5-7), etc.
+    for m in re.findall(r"[\(\[]([\d,\-\u2013\s]+)[\)\]]", raw_text):
+        for part in re.split(r"[,\s]+", m):
+            part = part.strip()
+            if "\u2013" in part or "-" in part:  # en dash or hyphen
+                rng = re.split(r"[\u2013-]", part)
+                if len(rng) == 2 and rng[0].strip().isdigit() and rng[1].strip().isdigit():
+                    for n in range(int(rng[0].strip()), int(rng[1].strip()) + 1):
+                        cited.add(n)
+            elif part.isdigit():
+                cited.add(int(part))
+    return cited
+
+
+def count_references(reference_section: str | None) -> int:
+    """Count references in the reference list by counting non-empty lines."""
+    if not reference_section:
+        return 0
+    return len([line for line in reference_section.strip().split("\n") if line.strip()])
 
 
 def read_section(manuscript: Manuscript, section_name: str) -> str:

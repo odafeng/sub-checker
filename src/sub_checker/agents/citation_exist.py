@@ -7,6 +7,8 @@ from sub_checker.tools.manuscript_tools import (
     TOOL_GET_REFERENCE_LIST,
     TOOL_READ_SECTION,
     TOOL_SEARCH_TEXT,
+    count_references,
+    extract_citation_numbers,
     get_reference_list,
     read_section,
     search_text,
@@ -23,20 +25,52 @@ class CitationExistAgent(BaseCheckerAgent):
     def _default_system_prompt(self) -> str:
         return (
             "You are a citation completeness reviewer. Your job is to:\n"
-            "1. First determine the citation style used in this manuscript:\n"
-            "   - Numbered: [1], (1), [1-3], (1-3), (1,2,5), superscript numbers\n"
-            "   - Author-year: (Smith, 2020), (Jones et al., 2019)\n"
-            "2. Read through EVERY section of the manuscript to find ALL in-text citations\n"
-            "3. Read the reference list\n"
-            "4. Cross-check: every in-text citation must have a corresponding reference\n"
-            "5. Cross-check: every reference should be cited at least once in the text\n"
-            "6. For numbered citations, search for EACH reference number individually — "
-            "do not rely on scanning a single section. Use search_text to look for each number.\n\n"
-            "IMPORTANT: Be thorough. Read ALL sections including Discussion, Methods, "
-            "and their sub-sections. Citations often appear throughout the entire manuscript.\n\n"
+            "1. Review the DETERMINISTIC PRE-SCAN results provided in your initial message.\n"
+            "   These results were produced by regex and are highly reliable for numbered citations.\n"
+            "2. For numbered citations: TRUST the pre-scan. Only report issues if the pre-scan\n"
+            "   shows a mismatch (cited number not in reference list, or reference not cited).\n"
+            "3. For author-year citations: use tools to read each section and cross-check.\n"
+            "4. Check for mismatches in author names or years between citation and reference.\n"
+            "5. Read the reference list to verify formatting and detect duplicate entries.\n\n"
+            "IMPORTANT: Do NOT override the deterministic pre-scan for numbered citations.\n"
+            "The pre-scan has already searched the ENTIRE manuscript text. If it says a number\n"
+            "is cited, it IS cited — do not report it as missing.\n\n"
             "Use add_finding to report each issue. severity=error for missing citations, "
             "severity=warning for unreferenced entries."
         )
+
+    def _build_initial_message(self, manuscript: Manuscript, config: Config) -> str:
+        """Override to inject deterministic pre-scan results."""
+        base_msg = super()._build_initial_message(manuscript, config)
+
+        # Deterministic pre-pass
+        cited_nums = extract_citation_numbers(manuscript.raw_text)
+        ref_count = count_references(manuscript.reference_section)
+        ref_nums = set(range(1, ref_count + 1)) if ref_count > 0 else set()
+
+        cited_not_in_refs = sorted(cited_nums - ref_nums) if ref_nums else []
+        refs_not_cited = sorted(ref_nums - cited_nums) if cited_nums else []
+
+        pre_scan = [
+            "\n--- DETERMINISTIC PRE-SCAN (regex, highly reliable) ---",
+            f"Citation numbers found in text: {sorted(cited_nums)}",
+            f"Total distinct citation numbers: {len(cited_nums)}",
+            f"Reference list entries (by line count): {ref_count}",
+        ]
+
+        if cited_not_in_refs:
+            pre_scan.append(
+                f"POTENTIAL ISSUE: Citation numbers NOT in reference list: {cited_not_in_refs}"
+            )
+        if refs_not_cited:
+            pre_scan.append(
+                f"POTENTIAL ISSUE: Reference numbers NOT cited in text: {refs_not_cited}"
+            )
+        if not cited_not_in_refs and not refs_not_cited and cited_nums and ref_nums:
+            pre_scan.append("All numbered citations match reference list entries. No mismatches.")
+
+        pre_scan.append("--- END PRE-SCAN ---")
+        return base_msg + "\n".join(pre_scan)
 
     def get_tools(self) -> list[dict]:
         return [
