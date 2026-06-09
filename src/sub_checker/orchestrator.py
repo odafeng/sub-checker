@@ -166,6 +166,7 @@ async def run_all_phases(
     # --- Phase 4: Deterministic post-validation ---
     if on_progress:
         await on_progress("phase_start", "", {"phase": 4, "agents": ["deterministic_check"]})
+        await on_progress("agent_start", "deterministic_check", {})
 
     total_before = sum(len(r.findings) for r in results)
     results = run_deterministic_checks(results, manuscript)
@@ -184,6 +185,7 @@ async def run_all_phases(
     if remaining > 0:
         if on_progress:
             await on_progress("phase_start", "", {"phase": 5, "agents": ["reviewer"]})
+            await on_progress("agent_start", "reviewer", {})
 
         results = await run_reviewer(manuscript, results, model=config.model)
 

@@ -42,9 +42,18 @@ _load_dotenv()
 
 app = FastAPI(title="Sub-Checker API", version="0.1.0")
 
+_ALLOWED_ORIGINS = [
+    "http://localhost:5173",
+    "http://localhost:5174",
+    "http://127.0.0.1:5173",
+    "http://127.0.0.1:5174",
+    "http://localhost:8000",
+    "http://127.0.0.1:8000",
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -94,16 +103,20 @@ async def upload_manuscript(file: UploadFile) -> dict:
 
     session_id = uuid.uuid4().hex[:12]
     tmp_dir = Path(tempfile.mkdtemp(prefix=f"subcheck_{session_id}_"))
-    # Sanitize filename: strip path components to prevent path traversal
-    safe_name = Path(file.filename).name
-    if not safe_name or "/" in safe_name or "\\" in safe_name:
-        return {"error": "Invalid filename"}
-    docx_path = tmp_dir / safe_name
-    if not docx_path.resolve().is_relative_to(tmp_dir.resolve()):
-        return {"error": "Invalid filename"}
-    docx_path.write_bytes(await file.read())
+    try:
+        # Sanitize filename: strip path components to prevent path traversal
+        safe_name = Path(file.filename).name
+        if not safe_name or "/" in safe_name or "\\" in safe_name:
+            return {"error": "Invalid filename"}
+        docx_path = tmp_dir / safe_name
+        if not docx_path.resolve().is_relative_to(tmp_dir.resolve()):
+            return {"error": "Invalid filename"}
+        docx_path.write_bytes(await file.read())
 
-    manuscript = parse_docx(docx_path, tmp_dir)
+        manuscript = parse_docx(docx_path, tmp_dir)
+    except Exception as e:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        return {"error": f"Failed to parse manuscript: {e}"}
 
     _cleanup_stale_sessions()
     _active_runs[session_id] = {
@@ -127,6 +140,11 @@ async def upload_manuscript(file: UploadFile) -> dict:
 @app.websocket("/ws/check/{session_id}")
 async def websocket_check(websocket: WebSocket, session_id: str) -> None:
     """WebSocket endpoint for running checks with real-time progress."""
+    # Check Origin header to prevent cross-site WebSocket hijacking
+    origin = (websocket.headers.get("origin") or "").rstrip("/")
+    if origin and origin not in _ALLOWED_ORIGINS:
+        await websocket.close(code=4003)
+        return
     await websocket.accept()
 
     if session_id not in _active_runs:
