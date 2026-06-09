@@ -203,6 +203,44 @@ def _cross_validate(
     )
 
 
+async def _verify_single(
+    ref_num: int,
+    ref_text: str,
+    pubmed: PubMedClient,
+    s2: SemanticScholarClient,
+    crossref: CrossrefClient,
+) -> VerifiedReference:
+    """Verify a single reference against all three sources."""
+    parsed = _parse_reference(ref_text)
+
+    if not parsed["author"] and not parsed["doi"]:
+        return VerifiedReference(
+            ref_number=ref_num,
+            ref_text=ref_text[:100],
+            confidence=0.0,
+            status="unparseable",
+            sources_found=[],
+            details="Could not extract author or DOI from reference text",
+        )
+
+    # Query all three sources in parallel (rate limits handled per-client)
+    pm_task = _query_pubmed(pubmed, parsed["author"], parsed["year"], parsed["title_keywords"])
+    s2_task = _query_s2(s2, parsed["author"], parsed["year"], parsed["title_keywords"])
+    cr_task = _query_crossref(
+        crossref, parsed["author"], parsed["year"], parsed["title_keywords"], parsed["doi"]
+    )
+
+    pm_results, s2_results, cr_results = await asyncio.gather(pm_task, s2_task, cr_task)
+
+    verified = _cross_validate(parsed, pm_results, s2_results, cr_results)
+    verified.ref_number = ref_num
+    verified.ref_text = ref_text[:100]
+    return verified
+
+
+_BATCH_SIZE = 3  # Process references in batches to avoid overwhelming APIs
+
+
 async def verify_references(
     reference_lines: list[str],
     pubmed: PubMedClient,
@@ -211,40 +249,19 @@ async def verify_references(
 ) -> list[VerifiedReference]:
     """Verify all references against PubMed, Semantic Scholar, and Crossref.
 
-    Queries all three sources in parallel for each reference, then cross-validates.
+    Processes in batches of 3 to respect API rate limits while maintaining
+    parallelism within each batch.
     """
     results: list[VerifiedReference] = []
 
-    for i, ref_text in enumerate(reference_lines):
-        ref_num = i + 1
-        parsed = _parse_reference(ref_text)
-
-        if not parsed["author"] and not parsed["doi"]:
-            results.append(
-                VerifiedReference(
-                    ref_number=ref_num,
-                    ref_text=ref_text[:100],
-                    confidence=0.0,
-                    status="unparseable",
-                    sources_found=[],
-                    details="Could not extract author or DOI from reference text",
-                )
-            )
-            continue
-
-        # Query all three sources in parallel
-        pm_task = _query_pubmed(pubmed, parsed["author"], parsed["year"], parsed["title_keywords"])
-        s2_task = _query_s2(s2, parsed["author"], parsed["year"], parsed["title_keywords"])
-        cr_task = _query_crossref(
-            crossref, parsed["author"], parsed["year"], parsed["title_keywords"], parsed["doi"]
-        )
-
-        pm_results, s2_results, cr_results = await asyncio.gather(pm_task, s2_task, cr_task)
-
-        verified = _cross_validate(parsed, pm_results, s2_results, cr_results)
-        verified.ref_number = ref_num
-        verified.ref_text = ref_text[:100]
-        results.append(verified)
+    for batch_start in range(0, len(reference_lines), _BATCH_SIZE):
+        batch = reference_lines[batch_start : batch_start + _BATCH_SIZE]
+        tasks = [
+            _verify_single(batch_start + j + 1, ref_text, pubmed, s2, crossref)
+            for j, ref_text in enumerate(batch)
+        ]
+        batch_results = await asyncio.gather(*tasks)
+        results.extend(batch_results)
 
     return results
 

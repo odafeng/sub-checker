@@ -23,11 +23,11 @@ _RETRY_BACKOFF = (1.0, 3.0, 8.0)
 
 
 class SemanticScholarClient:
-    def __init__(self, max_concurrent: int = 3):
+    def __init__(self, max_concurrent: int = 1):
         self._semaphore = asyncio.Semaphore(max_concurrent)
         self._cache: dict[str, dict[str, Any]] = {}
         self._client: httpx.AsyncClient | None = None
-        self._min_interval = 0.35
+        self._min_interval = 1.0  # S2 rate limit is strict for unauthenticated
         self._last_request_time = 0.0
         self._rate_lock = asyncio.Lock()
 
