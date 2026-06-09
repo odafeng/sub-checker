@@ -38,8 +38,8 @@ def _render_cot(entries: list[dict], lang: str) -> str:
                 f'<div class="cot-entry cot-request">'
                 f'<span class="cot-ts">{ts}</span> '
                 f'<span class="cot-tag">REQUEST</span> '
-                f'{e.get("message_count", 0)} messages, {e.get("tool_count", 0)} tools'
-                f'</div>'
+                f"{e.get('message_count', 0)} messages, {e.get('tool_count', 0)} tools"
+                f"</div>"
             )
         elif etype == "api_response":
             blocks = e.get("content_blocks", [])
@@ -56,8 +56,8 @@ def _render_cot(entries: list[dict], lang: str) -> str:
                 f'<div class="cot-entry cot-response">'
                 f'<span class="cot-ts">{ts}</span> '
                 f'<span class="cot-tag">RESPONSE</span> '
-                f'stop={_esc(e.get("stop_reason", ""))}'
-                f'{detail}</div>'
+                f"stop={_esc(e.get('stop_reason', ''))}"
+                f"{detail}</div>"
             )
         elif etype == "tool_result":
             preview = _esc(e.get("result_preview", "")[:200])
@@ -65,31 +65,31 @@ def _render_cot(entries: list[dict], lang: str) -> str:
                 f'<div class="cot-entry cot-tool-result">'
                 f'<span class="cot-ts">{ts}</span> '
                 f'<span class="cot-tag">TOOL</span> '
-                f'{_esc(e.get("tool_name", ""))}'
+                f"{_esc(e.get('tool_name', ''))}"
                 f'<div class="cot-preview">{preview}</div>'
-                f'</div>'
+                f"</div>"
             )
         elif etype == "finding":
             rows.append(
                 f'<div class="cot-entry cot-finding">'
                 f'<span class="cot-ts">{ts}</span> '
                 f'<span class="cot-tag">FINDING</span> '
-                f'[{_esc(e.get("severity", ""))}] {_esc(e.get("message", "")[:150])}'
-                f'</div>'
+                f"[{_esc(e.get('severity', ''))}] {_esc(e.get('message', '')[:150])}"
+                f"</div>"
             )
         elif etype == "error":
             rows.append(
                 f'<div class="cot-entry cot-error">'
                 f'<span class="cot-ts">{ts}</span> '
                 f'<span class="cot-tag">ERROR</span> '
-                f'{_esc(e.get("error", ""))}'
-                f'</div>'
+                f"{_esc(e.get('error', ''))}"
+                f"</div>"
             )
     return (
         f'<details class="cot-details">'
         f'<summary class="cot-summary">{label} ({len(entries)} steps)</summary>'
         f'<div class="cot-body">{"".join(rows)}</div>'
-        f'</details>'
+        f"</details>"
     )
 
 

@@ -75,11 +75,7 @@ def parse_docx(docx_path: Path, figure_dir: Path | None = None) -> Manuscript:
     header_text = "\n".join(header_lines)
 
     # Title: prefer first line before any heading; fall back to first heading
-    title = (
-        header_lines[0]
-        if header_lines
-        else (sections[0].heading if sections else "Untitled")
-    )
+    title = header_lines[0] if header_lines else (sections[0].heading if sections else "Untitled")
 
     return Manuscript(
         title=title,
