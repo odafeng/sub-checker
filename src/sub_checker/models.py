@@ -34,6 +34,7 @@ class Manuscript:
     raw_text: str
     reference_section: str | None = None
     figure_dir: Path | None = None
+    header_text: str = ""  # Raw text before first heading (title, authors, abstract, etc.)
 
 
 @dataclass

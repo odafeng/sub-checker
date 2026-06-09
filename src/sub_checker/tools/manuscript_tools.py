@@ -27,10 +27,32 @@ def read_paragraph(manuscript: Manuscript, index: int) -> str:
     return f"Paragraph index {index} out of range (0-{len(manuscript.paragraphs) - 1})."
 
 
+def read_manuscript_header(manuscript: Manuscript) -> str:
+    """Return raw text before the first heading (title, authors, abstract, etc.)."""
+    if manuscript.header_text:
+        return (
+            "--- Raw document header (text before first heading) ---\n"
+            f"{manuscript.header_text}\n"
+            "--- End of header ---\n"
+            "NOTE: This is the raw text at the start of the .docx file, before any "
+            "heading-styled paragraph. It typically contains the title, author list, "
+            "affiliations, and sometimes the abstract. Use this to determine the "
+            "manuscript title and author information."
+        )
+    return "No text found before the first heading in the document."
+
+
 def get_reference_list(manuscript: Manuscript) -> str:
     """Get the reference list section."""
     if manuscript.reference_section:
-        return manuscript.reference_section
+        return (
+            f"{manuscript.reference_section}\n\n"
+            "NOTE: Reference list numbering may be missing above if the original "
+            ".docx uses Word auto-numbered lists — the numbers are stored as list "
+            "formatting metadata and are stripped during text extraction. Do NOT "
+            "report missing numbering as an error. Assume references are numbered "
+            "sequentially (1, 2, 3, ...) in the order they appear."
+        )
     return "No reference section found in the manuscript."
 
 
@@ -112,6 +134,20 @@ TOOL_READ_PARAGRAPH = {
             }
         },
         "required": ["index"],
+    },
+}
+
+TOOL_READ_MANUSCRIPT_HEADER = {
+    "name": "read_manuscript_header",
+    "description": (
+        "Read the raw text at the start of the document, before the first heading. "
+        "This typically contains the manuscript title, author list, affiliations, "
+        "correspondence info, and sometimes the abstract. Use this to determine the "
+        "true title and author information regardless of Word styling."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {},
     },
 }
 

@@ -7,8 +7,10 @@ from sub_checker.services.web import WebService
 from sub_checker.tools.filesystem_tools import TOOL_LIST_FIGURES, list_figures
 from sub_checker.tools.manuscript_tools import (
     TOOL_GET_METADATA,
+    TOOL_READ_MANUSCRIPT_HEADER,
     TOOL_READ_SECTION,
     get_metadata,
+    read_manuscript_header,
     read_section,
 )
 from sub_checker.tools.web_tools import (
@@ -56,12 +58,23 @@ class JournalGuidelinesAgent(BaseCheckerAgent):
             "- Funding / Acknowledgements\n\n"
             "REPORTING GUIDELINES:\n"
             "- CONSORT (RCTs), STROBE (observational), PRISMA (systematic reviews), etc.\n\n"
+            "IMPORTANT NOTES ON DOCUMENT PARSING:\n"
+            "- The manuscript is extracted from a .docx file. Some structural elements may not "
+            "be detected automatically (e.g., title, abstract, keywords may appear as plain text "
+            "without heading styles).\n"
+            "- ALWAYS use read_manuscript_header first to see the raw document start — this "
+            "contains the actual title, author list, and affiliations regardless of Word styling.\n"
+            "- A section like 'Methods' may show 0 paragraphs if its content is entirely in "
+            "sub-sections (e.g., 'Study Design', 'Statistical Analysis'). Check sub-sections "
+            "before reporting a section as empty.\n"
+            "- Do NOT report missing elements without first searching for them in the full text.\n\n"
             "Use add_finding for each non-compliance issue."
         )
 
     def get_tools(self) -> list[dict]:
         return [
             TOOL_READ_SECTION,
+            TOOL_READ_MANUSCRIPT_HEADER,
             TOOL_GET_METADATA,
             TOOL_WEB_SEARCH,
             TOOL_FETCH_PAGE,
@@ -76,6 +89,8 @@ class JournalGuidelinesAgent(BaseCheckerAgent):
             return read_section(ms, tool_input["section_name"])
         if tool_name == "get_metadata":
             return get_metadata(ms)
+        if tool_name == "read_manuscript_header":
+            return read_manuscript_header(ms)
         if tool_name == "list_figures":
             return list_figures(ms)
         if tool_name == "web_search":
