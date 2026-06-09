@@ -107,15 +107,27 @@ def format_html(report: Report, lang: str = "en") -> str:
     for result in report.results:
         display = checker_display_name(result.checker_name, lang)
         findings_html = ""
-        if not result.findings:
+        # Filter out findings marked as "filtered" by Phase 3 harness
+        active_findings = [f for f in result.findings if f.validation_status != "filtered"]
+        if not active_findings:
             findings_html = f'<p class="no-issues">{tr("no_issues")}</p>'
         else:
-            sorted_findings = sorted(result.findings, key=lambda f: _SEVERITY_ORDER[f.severity])
+            sorted_findings = sorted(active_findings, key=lambda f: _SEVERITY_ORDER[f.severity])
             rows = []
             for f in sorted_findings:
+                confidence_badge = ""
+                if f.validation_status == "confirmed":
+                    confidence_badge = (
+                        f' <span class="confidence-badge confirmed">{f.confidence:.0%}</span>'
+                    )
+                elif f.validation_status == "downgraded":
+                    confidence_badge = (
+                        f' <span class="confidence-badge downgraded">{f.confidence:.0%}</span>'
+                    )
                 rows.append(
                     f"<tr>"
-                    f'<td class="col-severity">{_severity_badge(f.severity, lang)}</td>'
+                    f'<td class="col-severity">{_severity_badge(f.severity, lang)}'
+                    f"{confidence_badge}</td>"
                     f'<td class="col-location">{_esc(f.location)}</td>'
                     f'<td class="col-message">{_esc(f.message)}</td>'
                     f'<td class="col-suggestion">{_esc(f.suggestion)}</td>'
@@ -131,9 +143,9 @@ def format_html(report: Report, lang: str = "en") -> str:
                 "</table>"
             )
 
-        e = sum(1 for f in result.findings if f.severity == Severity.ERROR)
-        w = sum(1 for f in result.findings if f.severity == Severity.WARNING)
-        i = sum(1 for f in result.findings if f.severity == Severity.INFO)
+        e = sum(1 for f in active_findings if f.severity == Severity.ERROR)
+        w = sum(1 for f in active_findings if f.severity == Severity.WARNING)
+        i = sum(1 for f in active_findings if f.severity == Severity.INFO)
         stats = []
         if e:
             stats.append(f'<span class="stat-error">{e} {tr("errors").lower()}</span>')
@@ -365,6 +377,18 @@ def format_html(report: Report, lang: str = "en") -> str:
   .cot-text {{ color: var(--text-dim); margin: 0.25rem 0 0 1.5rem; white-space: pre-wrap; }}
   .cot-tool-call {{ color: var(--accent); margin: 0.25rem 0 0 1.5rem; }}
   .cot-preview {{ color: var(--text-dim); margin: 0.25rem 0 0 1.5rem; white-space: pre-wrap; }}
+  .confidence-badge {{
+    display: inline-block;
+    padding: 0.1em 0.4em;
+    border-radius: 4px;
+    font-size: 0.6rem;
+    font-weight: 700;
+    font-family: var(--mono);
+    margin-left: 0.3em;
+    vertical-align: middle;
+  }}
+  .confidence-badge.confirmed {{ background: rgba(74,222,128,0.15); color: var(--success); }}
+  .confidence-badge.downgraded {{ background: var(--warning-bg); color: var(--warning); }}
   @media (max-width: 768px) {{
     body {{ padding: 1rem; }}
     .summary {{ grid-template-columns: repeat(2, 1fr); }}

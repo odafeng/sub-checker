@@ -45,6 +45,10 @@ class Finding:
     location: str | None = None
     suggestion: str | None = None
     context: str | None = None
+    # Post-validation metadata (set by Phase 3 harness)
+    confidence: float = 1.0  # 0.0-1.0, set by reviewer
+    validation_status: str = ""  # "confirmed", "filtered", "downgraded", ""
+    validation_note: str = ""  # Reviewer's reasoning
 
 
 @dataclass

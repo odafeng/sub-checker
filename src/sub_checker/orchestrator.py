@@ -112,7 +112,8 @@ def build_report(
     total_cost = 0.0
     for r in results:
         for f in r.findings:
-            summary[f.severity] = summary.get(f.severity, 0) + 1
+            if f.validation_status != "filtered":
+                summary[f.severity] = summary.get(f.severity, 0) + 1
         # Opus 4.8 pricing: $5/M input, $25/M output
         total_cost += (
             r.token_usage.input_tokens * 5 + r.token_usage.output_tokens * 25
@@ -135,9 +136,18 @@ async def run_all_phases(
     config: Config,
     on_progress: AgentCallback | None = None,
 ) -> list[CheckerResult]:
-    """Execute agents in phased order. Returns all results."""
+    """Execute agents in phased order, then run Phase 3 post-validation.
+
+    Phase 1-2-3: Agent execution (parallel within each phase)
+    Phase 4: Deterministic post-validation (filter obvious false positives)
+    Phase 5: Reviewer agent (LLM-based validation of remaining findings)
+    """
+    from sub_checker.harness.deterministic import run_deterministic_checks
+    from sub_checker.harness.reviewer import run_reviewer
+
     results: list[CheckerResult] = []
 
+    # --- Agent execution phases ---
     for phase_num, phase_names in enumerate(PHASE_GROUPS, 1):
         phase_agents = [a for a in agents if a.name in phase_names]
         if not phase_agents:
@@ -152,5 +162,43 @@ async def run_all_phases(
             *[run_agent_safe(a, manuscript, config, on_progress) for a in phase_agents]
         )
         results.extend(phase_results)
+
+    # --- Phase 4: Deterministic post-validation ---
+    if on_progress:
+        await on_progress("phase_start", "", {"phase": 4, "agents": ["deterministic_check"]})
+
+    total_before = sum(len(r.findings) for r in results)
+    results = run_deterministic_checks(results, manuscript)
+    filtered_det = sum(1 for r in results for f in r.findings if f.validation_status == "filtered")
+    logger.info(
+        "Deterministic post-validation: %d/%d findings filtered", filtered_det, total_before
+    )
+
+    if on_progress:
+        await on_progress(
+            "agent_done", "deterministic_check", {"filtered": filtered_det, "elapsed": 0.0}
+        )
+
+    # --- Phase 5: Reviewer agent ---
+    remaining = total_before - filtered_det
+    if remaining > 0:
+        if on_progress:
+            await on_progress("phase_start", "", {"phase": 5, "agents": ["reviewer"]})
+
+        results = await run_reviewer(manuscript, results, model=config.model)
+
+        if on_progress:
+            confirmed = sum(
+                1 for r in results for f in r.findings if f.validation_status == "confirmed"
+            )
+            filtered_rev = (
+                sum(1 for r in results for f in r.findings if f.validation_status == "filtered")
+                - filtered_det
+            )
+            await on_progress(
+                "agent_done",
+                "reviewer",
+                {"confirmed": confirmed, "filtered": filtered_rev, "elapsed": 0.0},
+            )
 
     return results
