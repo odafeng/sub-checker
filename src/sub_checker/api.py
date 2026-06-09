@@ -101,22 +101,22 @@ async def upload_manuscript(file: UploadFile) -> dict:
     if not file.filename or not file.filename.endswith(".docx"):
         return {"error": "Please upload a .docx file"}
 
+    # Sanitize filename before creating any temp resources
+    safe_name = Path(file.filename).name
+    if not safe_name or safe_name != file.filename.replace("\\", "/").split("/")[-1]:
+        return {"error": "Invalid filename"}
+
     session_id = uuid.uuid4().hex[:12]
     tmp_dir = Path(tempfile.mkdtemp(prefix=f"subcheck_{session_id}_"))
     try:
-        # Sanitize filename: strip path components to prevent path traversal
-        safe_name = Path(file.filename).name
-        if not safe_name or "/" in safe_name or "\\" in safe_name:
-            return {"error": "Invalid filename"}
         docx_path = tmp_dir / safe_name
         if not docx_path.resolve().is_relative_to(tmp_dir.resolve()):
-            return {"error": "Invalid filename"}
+            raise ValueError("Invalid filename")
         docx_path.write_bytes(await file.read())
-
         manuscript = parse_docx(docx_path, tmp_dir)
     except Exception as e:
         shutil.rmtree(tmp_dir, ignore_errors=True)
-        return {"error": f"Failed to parse manuscript: {e}"}
+        return {"error": f"Failed to process manuscript: {e}"}
 
     _cleanup_stale_sessions()
     _active_runs[session_id] = {
