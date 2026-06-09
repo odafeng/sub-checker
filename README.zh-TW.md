@@ -2,7 +2,7 @@
 
 [English](README.md) | 繁體中文
 
-由 Claude agents 驅動的投稿前文稿檢查器。每項檢查由一個專門的 AI agent 透過結構化工具閱讀你的文稿，因此在理解語境方面遠優於正則表達式的 linter。
+由 Claude agents 驅動的投稿前文稿檢查器，採用 Plan-Execute-Verify harness 架構。每項檢查由專門的 AI agent 執行，再經 deterministic 驗證和 reviewer agent 過濾 false positives。
 
 ## 檢查項目
 
@@ -10,11 +10,11 @@
 |-------|------|
 | **typo_grammar** | 拼字、文法、不通順的語句（跳過參考文獻列表） |
 | **figure_table** | 圖表引用是否存在、編號是否連續、檔案是否存在 |
-| **citation_exist** | 文中引用與參考文獻列表是否一一對應 |
+| **citation_exist** | 文中引用與參考文獻列表是否一一對應（deterministic pre-scan + agent） |
 | **citation_format** | 參考文獻列表是否符合目標期刊的引用格式（APA、Vancouver、AMA 等） |
 | **journal_guidelines** | 字數、必要章節、摘要格式、必要聲明（COI、倫理、資料可用性） |
 | **logic** | 矛盾、缺乏支持的主張、方法與結果不一致 |
-| **citation_claim** | 從 PubMed（含 Semantic Scholar 備援）取得引用論文摘要，驗證是否支持你的主張 |
+| **citation_claim** | 三源驗證（PubMed + Semantic Scholar + Crossref），再比對引用論文摘要與文中主張 |
 
 ## 安裝
 
@@ -53,7 +53,7 @@ sub-check paper.docx --only figure,citation
 # 跳過高成本 checker
 sub-check paper.docx --skip claim,logic
 
-# 輸出 HTML 報告（含 COT viewer）
+# 輸出 HTML 報告（含 COT viewer + confidence scores）
 sub-check paper.docx -o html --output-file report.html
 
 # 輸出 JSON（供程式使用）
@@ -73,7 +73,7 @@ uvicorn sub_checker.api:app --reload
 cd frontend && npm run dev
 ```
 
-開啟 `http://localhost:5173` — 上傳 `.docx`、選期刊、跑檢查、看報告。
+開啟 `http://localhost:5173` — 上傳 `.docx`、選期刊、跑檢查、看報告（含 confidence badges 和 false positive 過濾）。
 
 ### CLI 選項
 
@@ -95,24 +95,38 @@ sub-check [OPTIONS] MANUSCRIPT_PATH
   --init             產生預設 .sub-checker.yaml
 ```
 
+## Pipeline（5 階段）
+
+```
+Phase 1-3  │  7 個 checker agents（phase 內平行執行）
+Phase 4    │  Deterministic 後驗證（日期數學、引用交叉比對）
+Phase 5    │  Reviewer agent 驗證所有 findings → confidence scores
+```
+
+- **執行前**：deterministic 引用預掃 + 三源參考文獻驗證
+- **執行後**：false positives 被過濾，留下的 findings 標註 confidence score（0-100%）
+- 詳見 [harness-architecture.md](docs/harness-architecture.md)
+
 ## HTML 報告功能
 
 - 深色主題報告，帶嚴重程度標籤
-- 各 agent 可摺疊展開的 section
+- **Confidence scores** — 每個 finding 顯示 reviewer 給的可信度（%）
+- **False positive 過濾** — deterministic + reviewer agent 移除錯誤的 findings
 - **Chain of Thought viewer** — 展開後可看每個 API call、tool use、推理步驟
+- **Model 顯示** — 報告標明使用哪個 Claude 模型
 - 多語系支援（English / 繁體中文）
 
 ## 費用估算
 
-預設使用 Claude Sonnet。約 4000 字文稿的近似費用：
+預設使用 Claude Opus 4.8。約 4000 字文稿的近似費用：
 
 | 範圍 | Agents | 時間 | 費用 |
 |------|--------|------|------|
-| 快速檢查 | `--only figure,citation` | ~4 min | ~$1.50 |
-| 標準檢查 | `--skip claim` | ~8 min | ~$3.50 |
-| 完整檢查 | 全部 7 agents | ~12 min | ~$5–8 |
+| 快速檢查 | `--only figure,citation` | ~4 min | ~$3 |
+| 標準檢查 | `--skip claim` | ~8 min | ~$7 |
+| 完整檢查 | 全部 7 agents + harness | ~12 min | ~$12–16 |
 
-可在 `.sub-checker.yaml` 中更改模型（如用 `claude-haiku-4-5-20251001` 降低費用）。
+可在 `.sub-checker.yaml` 中更改模型（如用 `claude-sonnet-4-6` 降低費用）。
 
 ## 日誌
 
@@ -126,11 +140,12 @@ sub-check [OPTIONS] MANUSCRIPT_PATH
 
 ## 架構
 
-- 7 個 agents，各有 system prompt + 策劃的 tools + agentic loop（[ADR-0002](docs/adr/0002-agent-per-checker-architecture.md)）
-- 共用 orchestrator 分 3 phases 執行（phase 內平行）
+- **5 階段 pipeline**：Plan-Execute-Verify harness（[ADR-0010](docs/adr/0010-plan-execute-verify-harness.md)）
+- 7 個 agents + reviewer agent，各有 system prompt + 策劃的 tools + agentic loop（[ADR-0002](docs/adr/0002-agent-per-checker-architecture.md)）
 - Parser 提供原始資料；agents 自行判斷文件結構（[ADR-0009](docs/adr/0009-agent-over-deterministic-parsing.md)）
-- PubMed + Semantic Scholar 引用驗證（[ADR-0005](docs/adr/0005-semantic-scholar-fallback.md)）
+- 三源引用驗證：PubMed + Semantic Scholar + Crossref（[ADR-0005](docs/adr/0005-semantic-scholar-fallback.md)）
 - FastAPI + React + TypeScript GUI（[ADR-0006](docs/adr/0006-fastapi-react-gui.md)）
+- [效能比較](docs/benchmark-comparison.md) | [Harness 架構](docs/harness-architecture.md)
 
 ## 授權
 

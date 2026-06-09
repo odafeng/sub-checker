@@ -2,7 +2,7 @@
 
 [繁體中文](README.zh-TW.md) | English
 
-Pre-submission manuscript checker powered by Claude agents. Each check is performed by a specialized AI agent that reads your manuscript through structured tools, so it understands context far better than regex-based linters.
+Pre-submission manuscript checker powered by Claude agents with a Plan-Execute-Verify harness. Each check is performed by a specialized AI agent, then validated by deterministic checks and a reviewer agent to eliminate false positives.
 
 ## What it checks
 
@@ -10,11 +10,11 @@ Pre-submission manuscript checker powered by Claude agents. Each check is perfor
 |-------|-------------|
 | **typo_grammar** | Spelling, grammar, awkward phrasing (skips reference list) |
 | **figure_table** | Figure/table references exist, numbering is sequential, files present |
-| **citation_exist** | In-text citations match the reference list (and vice versa) |
+| **citation_exist** | In-text citations match the reference list (deterministic pre-scan + agent) |
 | **citation_format** | Reference list follows target journal's citation style (APA, Vancouver, AMA, etc.) |
 | **journal_guidelines** | Word count, required sections, abstract format, required statements (COI, ethics, data availability) |
 | **logic** | Contradictions, unsupported claims, methods-results mismatches |
-| **citation_claim** | Fetches cited paper abstracts from PubMed (with Semantic Scholar fallback), verifies they support your claims |
+| **citation_claim** | Multi-source verification (PubMed + Semantic Scholar + Crossref), then verifies claims against abstracts |
 
 ## Install
 
@@ -53,7 +53,7 @@ sub-check paper.docx --only figure,citation
 # Skip expensive checkers
 sub-check paper.docx --skip claim,logic
 
-# Output as styled HTML report (includes COT viewer)
+# Output as styled HTML report (includes COT viewer + confidence scores)
 sub-check paper.docx -o html --output-file report.html
 
 # Output as JSON (for programmatic use)
@@ -73,7 +73,7 @@ uvicorn sub_checker.api:app --reload
 cd frontend && npm run dev
 ```
 
-Open `http://localhost:5173` — upload a `.docx`, pick a journal, run, and view the report.
+Open `http://localhost:5173` — upload a `.docx`, pick a journal, run, and view the report with confidence badges and filtered false positives.
 
 ### CLI options
 
@@ -95,24 +95,38 @@ Options:
   --init             Generate default .sub-checker.yaml
 ```
 
+## Pipeline (5 phases)
+
+```
+Phase 1-3  │  7 checker agents (parallel within each phase)
+Phase 4    │  Deterministic post-validation (date math, citation cross-check)
+Phase 5    │  Reviewer agent validates all findings → confidence scores
+```
+
+- **Pre-execution**: deterministic citation pre-scan + multi-source reference verification
+- **Post-validation**: false positives filtered, remaining findings get confidence scores (0-100%)
+- See [harness-architecture.md](docs/harness-architecture.md) for full technical details
+
 ## HTML report features
 
 - Dark-themed styled report with severity badges
-- Collapsible sections per checker agent
-- **Chain of Thought viewer** — expand to see every API call, tool use, and reasoning step behind each finding
+- **Confidence scores** — each finding shows reviewer-assigned confidence (%)
+- **False positive filtering** — deterministic + reviewer agent removes incorrect findings
+- **Chain of Thought viewer** — expand to see every API call, tool use, and reasoning step
+- **Model display** — shows which Claude model generated the report
 - i18n support (English / Traditional Chinese)
 
 ## Cost estimate
 
-Uses Claude Sonnet by default. Approximate cost per manuscript (~4000 words):
+Uses Claude Opus 4.8 by default. Approximate cost per manuscript (~4000 words):
 
 | Scope | Agents | Time | Cost |
 |-------|--------|------|------|
-| Quick check | `--only figure,citation` | ~4 min | ~$1.50 |
-| Standard | `--skip claim` | ~8 min | ~$3.50 |
-| Full check | all 7 agents | ~12 min | ~$5–8 |
+| Quick check | `--only figure,citation` | ~4 min | ~$3 |
+| Standard | `--skip claim` | ~8 min | ~$7 |
+| Full check | all 7 agents + harness | ~12 min | ~$12–16 |
 
-You can change the model in `.sub-checker.yaml` (e.g. use `claude-haiku-4-5-20251001` for cheaper runs).
+You can change the model in `.sub-checker.yaml` (e.g. use `claude-sonnet-4-6` for cheaper runs).
 
 ## Logging
 
@@ -126,11 +140,12 @@ Set `cot_dir: "disabled"` in `.sub-checker.yaml` to turn off COT file logging (e
 
 ## Architecture
 
-- 7 agents, each with a system prompt + curated tools + agentic loop ([ADR-0002](docs/adr/0002-agent-per-checker-architecture.md))
-- Shared orchestrator runs agents in 3 phases (parallel within each phase)
-- Parser provides raw data; agents judge document structure themselves ([ADR-0009](docs/adr/0009-agent-over-deterministic-parsing.md))
-- PubMed + Semantic Scholar for citation verification ([ADR-0005](docs/adr/0005-semantic-scholar-fallback.md))
+- **5-phase pipeline**: Plan-Execute-Verify harness ([ADR-0010](docs/adr/0010-plan-execute-verify-harness.md))
+- 7 agents + reviewer agent, each with system prompt + curated tools + agentic loop ([ADR-0002](docs/adr/0002-agent-per-checker-architecture.md))
+- Parser provides raw data; agents judge document structure ([ADR-0009](docs/adr/0009-agent-over-deterministic-parsing.md))
+- Multi-source citation verification: PubMed + Semantic Scholar + Crossref ([ADR-0005](docs/adr/0005-semantic-scholar-fallback.md))
 - FastAPI + React + TypeScript GUI ([ADR-0006](docs/adr/0006-fastapi-react-gui.md))
+- [Benchmark comparison](docs/benchmark-comparison.md) | [Harness architecture](docs/harness-architecture.md)
 
 ## License
 

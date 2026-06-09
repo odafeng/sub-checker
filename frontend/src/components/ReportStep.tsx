@@ -34,12 +34,33 @@ function Badge({ severity, lang }: { severity: string; lang: string }) {
   );
 }
 
+function ConfidenceBadge({ status, confidence }: { status: string; confidence: number }) {
+  if (status === "confirmed") {
+    return (
+      <span className="inline-block px-1.5 py-0.5 rounded text-[10px] font-bold font-mono bg-emerald-500/15 text-emerald-400 ml-1.5">
+        {Math.round(confidence * 100)}%
+      </span>
+    );
+  }
+  if (status === "downgraded") {
+    return (
+      <span className="inline-block px-1.5 py-0.5 rounded text-[10px] font-bold font-mono bg-amber-500/15 text-amber-400 ml-1.5">
+        {Math.round(confidence * 100)}%
+      </span>
+    );
+  }
+  return null;
+}
+
 function FindingRow({ f, lang }: { f: Finding; lang: string }) {
   const zh = lang === "zh-TW";
   return (
     <div className="border-b border-[var(--border)] last:border-0 py-3 px-1">
       <div className="flex items-start gap-3">
-        <Badge severity={f.severity} lang={lang} />
+        <div className="flex items-center">
+          <Badge severity={f.severity} lang={lang} />
+          <ConfidenceBadge status={f.validation_status} confidence={f.confidence} />
+        </div>
         <div className="flex-1 min-w-0">
           <p className="text-sm">{f.message}</p>
           {f.location && (
@@ -72,8 +93,21 @@ export default function ReportStep({ report, reportHtml, lang }: Props) {
     });
   };
 
+  // Filter out filtered findings from all results for card view
+  const filteredResults = report.results.map((r) => ({
+    ...r,
+    findings: r.findings.filter((f) => f.validation_status !== "filtered"),
+  }));
+
   return (
     <div className="space-y-6">
+      {/* Model info */}
+      {report.model && (
+        <div className="text-xs text-[#8b90a5] text-right">
+          Model: <span className="font-mono font-medium text-[var(--text)]">{report.model}</span>
+        </div>
+      )}
+
       {/* Summary cards */}
       <div className="grid grid-cols-5 gap-3">
         {[
@@ -142,7 +176,7 @@ export default function ReportStep({ report, reportHtml, lang }: Props) {
       {/* Content */}
       {view === "cards" ? (
         <div className="space-y-3">
-          {report.results.map((r) => (
+          {filteredResults.map((r) => (
             <div
               key={r.checker}
               className="bg-[var(--surface)] border border-[var(--border)] rounded-xl overflow-hidden"

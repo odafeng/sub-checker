@@ -9,6 +9,8 @@ const CHECKERS = [
   { name: "journal_guidelines", en: "Journal Guidelines", zh: "期刊投稿規範", icon: "📋", color: "#f472b6" },
   { name: "logic", en: "Logic Consistency", zh: "邏輯一致性", icon: "⟷", color: "#c084fc" },
   { name: "citation_claim", en: "Citation-Claim", zh: "引用-主張驗證", icon: "✓?", color: "#fb923c" },
+  { name: "deterministic_check", en: "Deterministic Validation", zh: "確定性驗證", icon: "fx", color: "#94a3b8" },
+  { name: "reviewer", en: "Reviewer Agent", zh: "審查 Agent", icon: "QA", color: "#e879f9" },
 ];
 
 interface Props {

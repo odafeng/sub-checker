@@ -22,6 +22,8 @@ export interface Finding {
   location: string | null;
   suggestion: string | null;
   context: string | null;
+  confidence: number;
+  validation_status: "" | "confirmed" | "downgraded" | "filtered";
 }
 
 export interface CheckerResult {
@@ -35,6 +37,7 @@ export interface ReportData {
   manuscript_path: string;
   timestamp: string;
   target_journal: string | null;
+  model: string;
   total_cost: number;
   summary: { error: number; warning: number; info: number };
   results: CheckerResult[];
