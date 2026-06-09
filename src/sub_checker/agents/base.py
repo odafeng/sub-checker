@@ -216,6 +216,7 @@ class BaseCheckerAgent(ABC):
             findings=list(self._findings),
             elapsed_seconds=elapsed,
             token_usage=self._token_usage,
+            cot_entries=cot.entries,
         )
 
 

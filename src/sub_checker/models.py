@@ -58,6 +58,7 @@ class CheckerResult:
     findings: list[Finding] = field(default_factory=list)
     elapsed_seconds: float = 0.0
     token_usage: TokenUsage = field(default_factory=TokenUsage)
+    cot_entries: list[dict] = field(default_factory=list)
 
 
 @dataclass

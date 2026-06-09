@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import html
+import json
 
 from sub_checker.i18n import checker_display_name, t
 from sub_checker.models import Report, Severity
@@ -21,6 +22,75 @@ def _severity_badge(severity: Severity, lang: str) -> str:
     css = {Severity.ERROR: "error", Severity.WARNING: "warning", Severity.INFO: "info"}
     label = t(_SEVERITY_KEY[severity], lang)
     return f'<span class="badge {css[severity]}">{label}</span>'
+
+
+def _render_cot(entries: list[dict], lang: str) -> str:
+    """Render COT entries as a collapsible details block."""
+    if not entries:
+        return ""
+    label = "Chain of Thought" if lang != "zh-TW" else "Agent 推理過程"
+    rows = []
+    for e in entries:
+        etype = e.get("type", "")
+        ts = e.get("timestamp", "")[:19]  # trim to seconds
+        if etype == "api_request":
+            rows.append(
+                f'<div class="cot-entry cot-request">'
+                f'<span class="cot-ts">{ts}</span> '
+                f'<span class="cot-tag">REQUEST</span> '
+                f'{e.get("message_count", 0)} messages, {e.get("tool_count", 0)} tools'
+                f'</div>'
+            )
+        elif etype == "api_response":
+            blocks = e.get("content_blocks", [])
+            detail = ""
+            for b in blocks:
+                if b.get("type") == "text":
+                    text = _esc(b.get("text", "")[:300])
+                    detail += f'<div class="cot-text">{text}</div>'
+                elif b.get("type") == "tool_use":
+                    tool = _esc(b.get("tool", ""))
+                    inp = _esc(json.dumps(b.get("input", {}), ensure_ascii=False)[:200])
+                    detail += f'<div class="cot-tool-call">{tool}({inp})</div>'
+            rows.append(
+                f'<div class="cot-entry cot-response">'
+                f'<span class="cot-ts">{ts}</span> '
+                f'<span class="cot-tag">RESPONSE</span> '
+                f'stop={_esc(e.get("stop_reason", ""))}'
+                f'{detail}</div>'
+            )
+        elif etype == "tool_result":
+            preview = _esc(e.get("result_preview", "")[:200])
+            rows.append(
+                f'<div class="cot-entry cot-tool-result">'
+                f'<span class="cot-ts">{ts}</span> '
+                f'<span class="cot-tag">TOOL</span> '
+                f'{_esc(e.get("tool_name", ""))}'
+                f'<div class="cot-preview">{preview}</div>'
+                f'</div>'
+            )
+        elif etype == "finding":
+            rows.append(
+                f'<div class="cot-entry cot-finding">'
+                f'<span class="cot-ts">{ts}</span> '
+                f'<span class="cot-tag">FINDING</span> '
+                f'[{_esc(e.get("severity", ""))}] {_esc(e.get("message", "")[:150])}'
+                f'</div>'
+            )
+        elif etype == "error":
+            rows.append(
+                f'<div class="cot-entry cot-error">'
+                f'<span class="cot-ts">{ts}</span> '
+                f'<span class="cot-tag">ERROR</span> '
+                f'{_esc(e.get("error", ""))}'
+                f'</div>'
+            )
+    return (
+        f'<details class="cot-details">'
+        f'<summary class="cot-summary">{label} ({len(entries)} steps)</summary>'
+        f'<div class="cot-body">{"".join(rows)}</div>'
+        f'</details>'
+    )
 
 
 def format_html(report: Report, lang: str = "en") -> str:
@@ -75,13 +145,15 @@ def format_html(report: Report, lang: str = "en") -> str:
             " · ".join(stats) if stats else f'<span class="stat-info">{tr("no_issues")}</span>'
         )
 
+        cot_html = _render_cot(result.cot_entries, lang)
+
         checker_sections.append(
             f'<section class="checker">'
             f'<div class="checker-header" onclick="this.parentElement.classList.toggle(\'collapsed\')">'
             f"<h2>{_esc(display)}</h2>"
             f'<div class="checker-meta">{stats_html} · {result.elapsed_seconds:.1f}s</div>'
             f"</div>"
-            f'<div class="checker-body">{findings_html}</div>'
+            f'<div class="checker-body">{findings_html}{cot_html}</div>'
             f"</section>"
         )
 
@@ -253,6 +325,46 @@ def format_html(report: Report, lang: str = "en") -> str:
   }}
   .footer a {{ color: var(--accent); text-decoration: none; }}
   .footer a:hover {{ text-decoration: underline; }}
+  .cot-details {{ margin-top: 1rem; }}
+  .cot-summary {{
+    cursor: pointer;
+    color: var(--text-dim);
+    font-size: 0.8rem;
+    font-weight: 600;
+    padding: 0.5rem 0;
+    user-select: none;
+  }}
+  .cot-summary:hover {{ color: var(--accent); }}
+  .cot-body {{
+    max-height: 500px;
+    overflow-y: auto;
+    padding: 0.75rem;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    line-height: 1.5;
+  }}
+  .cot-entry {{ padding: 0.3rem 0; border-bottom: 1px solid var(--border); }}
+  .cot-entry:last-child {{ border-bottom: none; }}
+  .cot-ts {{ color: var(--text-dim); }}
+  .cot-tag {{
+    display: inline-block;
+    padding: 0.1em 0.4em;
+    border-radius: 4px;
+    font-size: 0.65rem;
+    font-weight: 700;
+    margin-right: 0.3em;
+  }}
+  .cot-request .cot-tag {{ background: rgba(124,110,240,0.15); color: var(--accent); }}
+  .cot-response .cot-tag {{ background: rgba(94,181,247,0.15); color: var(--info); }}
+  .cot-tool-result .cot-tag {{ background: rgba(74,222,128,0.15); color: var(--success); }}
+  .cot-finding .cot-tag {{ background: var(--warning-bg); color: var(--warning); }}
+  .cot-error .cot-tag {{ background: var(--error-bg); color: var(--error); }}
+  .cot-text {{ color: var(--text-dim); margin: 0.25rem 0 0 1.5rem; white-space: pre-wrap; }}
+  .cot-tool-call {{ color: var(--accent); margin: 0.25rem 0 0 1.5rem; }}
+  .cot-preview {{ color: var(--text-dim); margin: 0.25rem 0 0 1.5rem; white-space: pre-wrap; }}
   @media (max-width: 768px) {{
     body {{ padding: 1rem; }}
     .summary {{ grid-template-columns: repeat(2, 1fr); }}

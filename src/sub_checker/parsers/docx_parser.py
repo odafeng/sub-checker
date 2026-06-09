@@ -30,15 +30,16 @@ def parse_docx(docx_path: Path, figure_dir: Path | None = None) -> Manuscript:
         style = para.style
         style_name = ((style.name or "") if style else "").lower()
         is_heading = "heading" in style_name
+        is_ref_heading = text.lower() in _REFERENCE_HEADINGS
 
-        if is_heading:
+        if is_heading or is_ref_heading:
             level = 1
             for ch in style_name:
                 if ch.isdigit():
                     level = int(ch)
                     break
 
-            if text.lower() in _REFERENCE_HEADINGS:
+            if is_ref_heading:
                 in_references = True
 
             current_section = Section(heading=text, level=level)

@@ -44,6 +44,12 @@ class CitationFormatAgent(BaseCheckerAgent):
             "3. Check EVERY reference list entry against the required format\n"
             "4. Check consistency (all entries should follow the same style)\n"
             "5. Check: author name format, punctuation, DOI/PMID inclusion, ordering\n\n"
+            "IMPORTANT: The manuscript text is extracted as plain text from a .docx file. "
+            "Superscript formatting is NOT preserved — you cannot tell whether numbers are "
+            "superscript or inline from the text alone. Do NOT assume superscript presence or "
+            "claim mixed superscript/bracket formats unless the text explicitly contains both "
+            "patterns like '[1]' AND '(1)' in different places. Parenthesized numbers like (1-3) "
+            "are a single consistent format — do not flag them as mixed.\n\n"
             "Use add_finding for each format violation."
         )
 
