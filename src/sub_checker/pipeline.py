@@ -63,4 +63,5 @@ async def run_pipeline(
         results,
         manuscript_path=str(manuscript.figure_dir or ""),
         journal=config.journal,
+        model=config.model,
     )

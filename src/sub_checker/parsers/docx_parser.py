@@ -10,6 +10,25 @@ from sub_checker.models import Manuscript, Paragraph, Section
 
 _REFERENCE_HEADINGS = {"references", "bibliography", "works cited", "literature cited"}
 _ABSTRACT_HEADINGS = {"abstract", "summary"}
+# Common section headings that may appear as plain text (Normal style) in .docx
+_SECTION_HEADINGS = {
+    "introduction",
+    "methods",
+    "materials and methods",
+    "results",
+    "discussion",
+    "conclusions",
+    "conclusion",
+    "acknowledgments",
+    "acknowledgements",
+    "disclosures",
+    "funding",
+    "figure legends",
+    "table legends",
+    "supplementary materials",
+    "supplementary material",
+    "appendix",
+}
 
 
 def parse_docx(docx_path: Path, figure_dir: Path | None = None) -> Manuscript:
@@ -35,8 +54,9 @@ def parse_docx(docx_path: Path, figure_dir: Path | None = None) -> Manuscript:
         is_heading = "heading" in style_name
         is_ref_heading = text.lower() in _REFERENCE_HEADINGS
         is_abstract_heading = text.lower() in _ABSTRACT_HEADINGS
+        is_section_heading = text.lower() in _SECTION_HEADINGS
 
-        if is_heading or is_ref_heading or is_abstract_heading:
+        if is_heading or is_ref_heading or is_abstract_heading or is_section_heading:
             first_heading_seen = True
             level = 1
             for ch in style_name:

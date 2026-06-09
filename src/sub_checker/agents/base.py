@@ -35,7 +35,7 @@ class BaseCheckerAgent(ABC):
 
     name: str = "base"
 
-    def __init__(self, model: str = "claude-sonnet-4-20250514"):
+    def __init__(self, model: str = "claude-opus-4-8"):
         self.model = model
         self._findings: list[Finding] = []
         self._token_usage = TokenUsage()
@@ -71,6 +71,13 @@ class BaseCheckerAgent(ABC):
         ]
         if config.journal:
             parts.append(f"Target journal: {config.journal}")
+        else:
+            parts.append(
+                "Target journal: NOT SPECIFIED. "
+                "Do NOT assume a specific journal or citation format. "
+                "Only check internal consistency (e.g., are all citations in the same style? "
+                "are all references formatted the same way?)."
+            )
         parts.append(
             f"The manuscript has {len(manuscript.sections)} sections "
             f"and {len(manuscript.paragraphs)} paragraphs."

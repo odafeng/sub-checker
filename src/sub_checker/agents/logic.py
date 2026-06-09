@@ -14,7 +14,7 @@ from sub_checker.tools.manuscript_tools import (
 class LogicAgent(BaseCheckerAgent):
     name = "logic"
 
-    def __init__(self, model: str = "claude-sonnet-4-20250514"):
+    def __init__(self, model: str = "claude-opus-4-8"):
         super().__init__(model=model)
         self._manuscript: Manuscript | None = None
 

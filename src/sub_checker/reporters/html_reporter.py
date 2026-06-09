@@ -381,6 +381,7 @@ def format_html(report: Report, lang: str = "en") -> str:
   <div class="header-meta">
     <span>{tr("journal_label")}: <strong>{journal_html}</strong></span>
     <span>{tr("generated")}: {timestamp}</span>
+    <span>Model: <strong>{_esc(report.model) or "N/A"}</strong></span>
   </div>
 </div>
 
@@ -410,7 +411,7 @@ def format_html(report: Report, lang: str = "en") -> str:
 {"".join(checker_sections)}
 
 <div class="footer">
-  {tr("generated_by")} <a href="https://github.com/odafeng/sub-checker">sub-checker</a> · {timestamp}
+  {tr("generated_by")} <a href="https://github.com/odafeng/sub-checker">sub-checker</a> · {_esc(report.model)} · {timestamp}
 </div>
 
 </body>

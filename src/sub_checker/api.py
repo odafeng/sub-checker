@@ -132,7 +132,7 @@ async def websocket_check(websocket: WebSocket, session_id: str) -> None:
             await websocket.send_json({"type": event, "agent": agent_name, **data})
 
         results = await run_all_phases(agents, manuscript, config, on_progress)
-        report = build_report(results, run_data["docx_path"], config.journal)
+        report = build_report(results, run_data["docx_path"], config.journal, model=config.model)
 
         # Store report for later retrieval via REST endpoint
         _active_runs[session_id]["report"] = report

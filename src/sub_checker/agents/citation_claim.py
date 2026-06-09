@@ -22,7 +22,7 @@ from sub_checker.tools.pubmed_tools import (
 class CitationClaimAgent(BaseCheckerAgent):
     name = "citation_claim"
 
-    def __init__(self, model: str = "claude-sonnet-4-20250514"):
+    def __init__(self, model: str = "claude-opus-4-8"):
         super().__init__(model=model)
         self._manuscript: Manuscript | None = None
         self._pubmed: PubMedClient | None = None

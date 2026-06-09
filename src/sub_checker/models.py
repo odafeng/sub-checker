@@ -70,3 +70,4 @@ class Report:
     results: list[CheckerResult] = field(default_factory=list)
     summary: dict[Severity, int] = field(default_factory=dict)
     total_cost: float = 0.0
+    model: str = ""

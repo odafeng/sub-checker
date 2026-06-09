@@ -105,6 +105,7 @@ def build_report(
     results: list[CheckerResult],
     manuscript_path: str,
     journal: str | None,
+    model: str = "",
 ) -> Report:
     """Build a Report from checker results. Single source of truth for cost calculation."""
     summary: dict[Severity, int] = {s: 0 for s in Severity}
@@ -112,9 +113,9 @@ def build_report(
     for r in results:
         for f in r.findings:
             summary[f.severity] = summary.get(f.severity, 0) + 1
-        # Sonnet pricing: $3/M input, $15/M output
+        # Opus 4.8 pricing: $5/M input, $25/M output
         total_cost += (
-            r.token_usage.input_tokens * 3 + r.token_usage.output_tokens * 15
+            r.token_usage.input_tokens * 5 + r.token_usage.output_tokens * 25
         ) / 1_000_000
 
     return Report(
@@ -124,6 +125,7 @@ def build_report(
         results=results,
         summary=summary,
         total_cost=total_cost,
+        model=model,
     )
 
 

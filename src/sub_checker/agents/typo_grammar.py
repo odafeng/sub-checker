@@ -16,7 +16,7 @@ from sub_checker.tools.manuscript_tools import (
 class TypoGrammarAgent(BaseCheckerAgent):
     name = "typo_grammar"
 
-    def __init__(self, model: str = "claude-sonnet-4-20250514"):
+    def __init__(self, model: str = "claude-opus-4-8"):
         super().__init__(model=model)
         self._manuscript: Manuscript | None = None
 
@@ -28,6 +28,16 @@ class TypoGrammarAgent(BaseCheckerAgent):
             "3. Flag awkward phrasing or non-standard academic English\n"
             "4. Skip the reference list section (reference formatting is handled by another agent)\n"
             "5. Be aware that scientific terms, gene names, chemical names, etc. are NOT typos\n\n"
+            "IMPORTANT NOTES:\n"
+            "- When checking dates, carefully compare with today's date provided in the "
+            "initial message. A date like 'November 2025' is in the PAST if today is 2026. "
+            "Only flag dates that are genuinely in the future.\n"
+            "- Each section's text is read independently. If you see a word like 'Methods' at "
+            "the end of a section, it is likely a standalone heading paragraph that was not "
+            "detected as a heading due to Word styling. Do NOT flag it as misplaced text.\n"
+            "- Do NOT report naming convention choices (e.g., underscore_names, CamelCase) as "
+            "inconsistencies unless there is a genuine mix of different conventions for the same "
+            "type of entity within the manuscript.\n\n"
             "Use add_finding for each issue. Include the incorrect text in 'context' "
             "and the suggested correction in 'suggestion'."
         )

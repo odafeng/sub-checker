@@ -14,7 +14,7 @@ class FigureConfig(BaseModel):
 
 class ClaimConfig(BaseModel):
     enabled: bool = True
-    model: str = "claude-sonnet-4-20250514"
+    model: str = "claude-opus-4-8"
     pubmed_email: str | None = None
     pubmed_api_key: str | None = None
     max_concurrent_pubmed: int = 3
@@ -25,7 +25,7 @@ class Config(BaseModel):
     manuscript: str | None = None
     language: str = "en-US"
     journal: str | None = None
-    model: str = "claude-sonnet-4-20250514"
+    model: str = "claude-opus-4-8"
     output_lang: str = "en"  # "en" or "zh-TW" — language for agent findings output
     cot_dir: str | None = (
         None  # COT log directory. None = default (~/.sub-checker/cot). "disabled" = no COT.
@@ -54,7 +54,7 @@ DEFAULT_CONFIG_YAML = """\
 language: "en-US"
 
 # Model for checker agents
-model: "claude-sonnet-4-20250514"
+model: "claude-opus-4-8"
 
 # Figure/Table checker
 figures:
@@ -65,7 +65,7 @@ figures:
 # Citation-claim verification
 claim:
   enabled: true
-  model: "claude-sonnet-4-20250514"
+  model: "claude-opus-4-8"
   pubmed_email: null
   pubmed_api_key: null
   max_concurrent_pubmed: 3

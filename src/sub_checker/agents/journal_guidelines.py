@@ -24,7 +24,7 @@ from sub_checker.tools.web_tools import (
 class JournalGuidelinesAgent(BaseCheckerAgent):
     name = "journal_guidelines"
 
-    def __init__(self, model: str = "claude-sonnet-4-20250514"):
+    def __init__(self, model: str = "claude-opus-4-8"):
         super().__init__(model=model)
         self._manuscript: Manuscript | None = None
         self._web_service: WebService | None = None
