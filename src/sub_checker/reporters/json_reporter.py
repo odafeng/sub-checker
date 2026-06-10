@@ -24,6 +24,7 @@ def format_json(report: Report) -> str:
         active_findings = [f for f in r.findings if f.validation_status != "filtered"]
         result_data: dict[str, Any] = {
             "checker": r.checker_name,
+            "model": r.model,
             "elapsed_seconds": r.elapsed_seconds,
             "token_usage": {
                 "input_tokens": r.token_usage.input_tokens,
@@ -38,6 +39,8 @@ def format_json(report: Report) -> str:
                     "location": f.location,
                     "suggestion": f.suggestion,
                     "context": f.context,
+                    "claim_type": f.claim_type,
+                    "ref_number": f.ref_number,
                     "confidence": f.confidence,
                     "validation_status": f.validation_status,
                 }

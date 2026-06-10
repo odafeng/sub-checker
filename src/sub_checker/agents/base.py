@@ -8,7 +8,7 @@ from abc import ABC, abstractmethod
 from datetime import UTC, datetime
 from functools import cached_property
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import anthropic
 from anthropic.types import MessageParam, ToolParam
@@ -30,7 +30,7 @@ logger = logging.getLogger("sub_checker.agents")
 MAX_ITERATIONS = 30
 
 
-def _set_message_cache_breakpoint(messages: list[MessageParam]) -> None:
+def set_message_cache_breakpoint(messages: list[MessageParam]) -> None:
     """Mark the last content block of the last message with cache_control.
 
     Moves the single message-level cache breakpoint forward each iteration so
@@ -47,7 +47,8 @@ def _set_message_cache_breakpoint(messages: list[MessageParam]) -> None:
 
     last_content = messages[-1].get("content")
     if isinstance(last_content, list) and last_content and isinstance(last_content[-1], dict):
-        last_content[-1]["cache_control"] = {"type": "ephemeral"}
+        last_block = cast("dict[str, Any]", last_content[-1])
+        last_block["cache_control"] = {"type": "ephemeral"}
 
 
 class BaseCheckerAgent(ABC):
@@ -109,6 +110,11 @@ class BaseCheckerAgent(ABC):
             f"and {len(manuscript.paragraphs)} paragraphs."
         )
         parts.append("Use the provided tools to read the manuscript and report any findings.")
+        parts.append(
+            "When calling add_finding, ALWAYS set claim_type (and claimed_date / "
+            "ref_number where applicable) — the validation harness uses these "
+            "fields to fact-check findings deterministically."
+        )
         if config.output_lang == "zh-TW":
             parts.append(
                 "\nIMPORTANT: Write ALL your findings (message, suggestion) in Traditional Chinese (繁體中文). "
@@ -126,6 +132,10 @@ class BaseCheckerAgent(ABC):
         except KeyError:
             severity = Severity.WARNING
 
+        ref_number = tool_input.get("ref_number")
+        if not isinstance(ref_number, int):
+            ref_number = None
+
         finding = Finding(
             checker=self.name,
             severity=severity,
@@ -133,6 +143,9 @@ class BaseCheckerAgent(ABC):
             location=tool_input.get("location"),
             suggestion=tool_input.get("suggestion"),
             context=tool_input.get("context"),
+            claim_type=tool_input.get("claim_type"),
+            claimed_date=tool_input.get("claimed_date"),
+            ref_number=ref_number,
         )
         self._findings.append(finding)
         return f"Finding recorded: [{severity.value}] {finding.message}"
@@ -198,7 +211,7 @@ class BaseCheckerAgent(ABC):
                     break
                 logger.debug("[%s] Iteration %d: sending API request", self.name, iteration)
                 cot.log_request(messages, tools)
-                _set_message_cache_breakpoint(messages)
+                set_message_cache_breakpoint(messages)
 
                 response = await client.messages.create(
                     model=self.model,
@@ -285,6 +298,7 @@ class BaseCheckerAgent(ABC):
             elapsed_seconds=elapsed,
             token_usage=self._token_usage,
             cot_entries=cot.entries,
+            model=self.model,
         )
 
 
@@ -315,6 +329,39 @@ ADD_FINDING_TOOL = {
             "context": {
                 "type": "string",
                 "description": "Surrounding text snippet for context",
+            },
+            "claim_type": {
+                "type": "string",
+                "enum": [
+                    "future_date",
+                    "uncited_reference",
+                    "missing_reference",
+                    "inconsistency",
+                    "other",
+                ],
+                "description": (
+                    "Machine-checkable claim category. Use 'future_date' when the finding "
+                    "claims a date is in the future, 'uncited_reference' when a reference "
+                    "list entry is claimed to never be cited in the text, "
+                    "'missing_reference' when a citation number is claimed to be absent "
+                    "from the reference list, 'inconsistency' for format/style "
+                    "inconsistency claims, 'other' otherwise. ALWAYS set this field — it "
+                    "lets the validation harness fact-check the finding deterministically."
+                ),
+            },
+            "claimed_date": {
+                "type": "string",
+                "description": (
+                    "For claim_type='future_date': the date the claim is about, "
+                    "as 'YYYY' or 'YYYY-MM' (e.g. '2025-11')"
+                ),
+            },
+            "ref_number": {
+                "type": "integer",
+                "description": (
+                    "For citation-related claims: the reference/citation number "
+                    "the finding concerns (e.g. 23 for reference [23])"
+                ),
             },
         },
         "required": ["severity", "message"],

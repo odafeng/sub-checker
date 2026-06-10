@@ -65,4 +65,5 @@ async def run_pipeline(
         journal=config.journal,
         model=config.model,
         harness_usage=harness_usage,
+        harness_model=config.reviewer_model or config.model,
     )

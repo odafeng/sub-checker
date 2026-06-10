@@ -44,11 +44,18 @@ def _usage_cost(usage: TokenUsage, model: str) -> float:
     ) / 1_000_000
 
 
-# Phase definitions: which agents run in parallel within each phase
-PHASE_GROUPS: list[set[str]] = [
-    {"typo_grammar", "figure_table", "citation_exist"},
-    {"citation_format", "journal_guidelines", "logic"},
-    {"citation_claim"},
+# Scheduling order: light/fast checkers first, citation_claim last (it runs
+# an expensive multi-source pre-pass). No data flows between checkers, so a
+# global concurrency cap replaces phase barriers — a slow checker no longer
+# blocks unrelated ones.
+AGENT_ORDER: list[str] = [
+    "typo_grammar",
+    "figure_table",
+    "citation_exist",
+    "citation_format",
+    "journal_guidelines",
+    "logic",
+    "citation_claim",
 ]
 
 # Callback type for progress notifications
@@ -66,16 +73,16 @@ def create_agents(config: Config) -> list[BaseCheckerAgent]:
     from sub_checker.agents.logic import LogicAgent
     from sub_checker.agents.typo_grammar import TypoGrammarAgent
 
-    model = config.model
-    return [
-        TypoGrammarAgent(model=model),
-        FigureTableAgent(model=model),
-        CitationExistAgent(model=model),
-        CitationFormatAgent(model=model),
-        JournalGuidelinesAgent(model=model),
-        LogicAgent(model=model),
-        CitationClaimAgent(model=model),
+    classes = [
+        TypoGrammarAgent,
+        FigureTableAgent,
+        CitationExistAgent,
+        CitationFormatAgent,
+        JournalGuidelinesAgent,
+        LogicAgent,
+        CitationClaimAgent,
     ]
+    return [cls(model=config.model_for(cls.name)) for cls in classes]
 
 
 def filter_agents(
@@ -134,11 +141,13 @@ def build_report(
     journal: str | None,
     model: str = "",
     harness_usage: TokenUsage | None = None,
+    harness_model: str = "",
 ) -> Report:
     """Build a Report from checker results. Single source of truth for cost calculation.
 
-    harness_usage: token usage from post-validation (reviewer agent), counted
-    into total_cost but not attributed to any single checker.
+    Each result is costed with the model that actually produced it (checkers
+    may run on different models). harness_usage is the reviewer agent's token
+    usage, costed with harness_model (falls back to `model`).
     """
     summary: dict[Severity, int] = {s: 0 for s in Severity}
     total_cost = 0.0
@@ -146,9 +155,9 @@ def build_report(
         for f in r.findings:
             if f.validation_status != "filtered":
                 summary[f.severity] = summary.get(f.severity, 0) + 1
-        total_cost += _usage_cost(r.token_usage, model)
+        total_cost += _usage_cost(r.token_usage, r.model or model)
     if harness_usage:
-        total_cost += _usage_cost(harness_usage, model)
+        total_cost += _usage_cost(harness_usage, harness_model or model)
 
     return Report(
         manuscript_path=manuscript_path,
@@ -167,11 +176,14 @@ async def run_all_phases(
     config: Config,
     on_progress: AgentCallback | None = None,
 ) -> tuple[list[CheckerResult], TokenUsage]:
-    """Execute agents in phased order, then run Phase 3 post-validation.
+    """Execute checker agents, then run post-validation.
 
-    Phase 1-2-3: Agent execution (parallel within each phase)
-    Phase 4: Deterministic post-validation (filter obvious false positives)
-    Phase 5: Reviewer agent (LLM-based validation of remaining findings)
+    Phase 1: Agent execution — all checkers run concurrently under a global
+             concurrency cap (config.max_concurrent_agents). No checker
+             depends on another's output, so there are no barriers; light
+             checkers are scheduled first, citation_claim last.
+    Phase 2: Deterministic post-validation (filter obvious false positives)
+    Phase 3: Reviewer agent (LLM-based validation of remaining findings)
 
     Returns (results, harness_usage) where harness_usage is the reviewer
     agent's token usage (for cost accounting).
@@ -179,27 +191,24 @@ async def run_all_phases(
     from sub_checker.harness.deterministic import run_deterministic_checks
     from sub_checker.harness.reviewer import run_reviewer
 
-    results: list[CheckerResult] = []
+    # --- Phase 1: Agent execution (bounded concurrency) ---
+    order = {name: i for i, name in enumerate(AGENT_ORDER)}
+    scheduled = sorted(agents, key=lambda a: order.get(a.name, len(order)))
 
-    # --- Agent execution phases ---
-    for phase_num, phase_names in enumerate(PHASE_GROUPS, 1):
-        phase_agents = [a for a in agents if a.name in phase_names]
-        if not phase_agents:
-            continue
-
-        if on_progress:
-            await on_progress(
-                "phase_start", "", {"phase": phase_num, "agents": [a.name for a in phase_agents]}
-            )
-
-        phase_results = await asyncio.gather(
-            *[run_agent_safe(a, manuscript, config, on_progress) for a in phase_agents]
-        )
-        results.extend(phase_results)
-
-    # --- Phase 4: Deterministic post-validation ---
     if on_progress:
-        await on_progress("phase_start", "", {"phase": 4, "agents": ["deterministic_check"]})
+        await on_progress("phase_start", "", {"phase": 1, "agents": [a.name for a in scheduled]})
+
+    semaphore = asyncio.Semaphore(max(1, config.max_concurrent_agents))
+
+    async def run_limited(agent: BaseCheckerAgent) -> CheckerResult:
+        async with semaphore:
+            return await run_agent_safe(agent, manuscript, config, on_progress)
+
+    results: list[CheckerResult] = list(await asyncio.gather(*[run_limited(a) for a in scheduled]))
+
+    # --- Phase 2: Deterministic post-validation ---
+    if on_progress:
+        await on_progress("phase_start", "", {"phase": 2, "agents": ["deterministic_check"]})
         await on_progress("agent_start", "deterministic_check", {})
 
     total_before = sum(len(r.findings) for r in results)
@@ -214,15 +223,17 @@ async def run_all_phases(
             "agent_done", "deterministic_check", {"filtered": filtered_det, "elapsed": 0.0}
         )
 
-    # --- Phase 5: Reviewer agent ---
+    # --- Phase 3: Reviewer agent ---
     harness_usage = TokenUsage()
     remaining = total_before - filtered_det
     if remaining > 0:
         if on_progress:
-            await on_progress("phase_start", "", {"phase": 5, "agents": ["reviewer"]})
+            await on_progress("phase_start", "", {"phase": 3, "agents": ["reviewer"]})
             await on_progress("agent_start", "reviewer", {})
 
-        results, harness_usage = await run_reviewer(manuscript, results, model=config.model)
+        results, harness_usage = await run_reviewer(
+            manuscript, results, model=config.reviewer_model or config.model
+        )
 
         if on_progress:
             confirmed = sum(

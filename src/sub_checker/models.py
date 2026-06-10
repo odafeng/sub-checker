@@ -45,10 +45,16 @@ class Finding:
     location: str | None = None
     suggestion: str | None = None
     context: str | None = None
+    # Structured claim fields (set by the agent via add_finding) — these let
+    # the deterministic harness validate facts instead of parsing prose.
+    claim_type: str | None = None  # "future_date", "uncited_reference", "missing_reference", ...
+    claimed_date: str | None = None  # "YYYY" or "YYYY-MM" for date-related claims
+    ref_number: int | None = None  # reference/citation number the claim concerns
     # Post-validation metadata (set by Phase 3 harness)
     confidence: float = 1.0  # 0.0-1.0, set by reviewer
     validation_status: str = ""  # "confirmed", "filtered", "downgraded", ""
     validation_note: str = ""  # Reviewer's reasoning
+    original_severity: Severity | None = None  # severity before a downgrade (restorable)
 
 
 @dataclass
@@ -72,6 +78,7 @@ class CheckerResult:
     elapsed_seconds: float = 0.0
     token_usage: TokenUsage = field(default_factory=TokenUsage)
     cot_entries: list[dict] = field(default_factory=list)
+    model: str = ""  # model that produced this result (for per-checker cost)
 
 
 @dataclass

@@ -177,6 +177,7 @@ async def websocket_check(websocket: WebSocket, session_id: str) -> None:
             config.journal,
             model=config.model,
             harness_usage=harness_usage,
+            harness_model=config.reviewer_model or config.model,
         )
 
         # Store report for later retrieval via REST endpoint

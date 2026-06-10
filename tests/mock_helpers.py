@@ -50,7 +50,9 @@ def build_text_response(text: str = "Done.") -> MockResponse:
     return MockResponse(content=[MockTextBlock(text=text)], stop_reason="end_turn")
 
 
-def mock_anthropic_client(*responses: MockResponse):
+def mock_anthropic_client(
+    *responses: MockResponse, target: str = "sub_checker.agents.base.anthropic.AsyncAnthropic"
+):
     """Create a patched AsyncAnthropic that returns the given responses in sequence.
 
     Usage:
@@ -61,6 +63,4 @@ def mock_anthropic_client(*responses: MockResponse):
     mock_client_instance = MagicMock()
     mock_client_instance.messages.create = mock_create
 
-    return patch(
-        "sub_checker.agents.base.anthropic.AsyncAnthropic", return_value=mock_client_instance
-    )
+    return patch(target, return_value=mock_client_instance)

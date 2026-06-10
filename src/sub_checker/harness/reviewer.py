@@ -1,8 +1,13 @@
 """Reviewer agent: post-validation of all findings against the manuscript.
 
-An independent Opus agent that reviews every finding produced by the checker
-agents, cross-references against the actual manuscript, and either confirms,
-downgrades, or filters each finding. This is the LLM-based layer of Phase 3.
+An independent agent that reviews every finding produced by the checker
+agents and either confirms, downgrades, or filters each one. Unlike the
+checkers it is adversarial: its job is to disprove findings.
+
+The reviewer is agentic — it has read_section / search_text /
+get_reference_list tools so it can verify each finding against the actual
+manuscript text instead of guessing from a truncated preview. Verdicts are
+returned through a submit_verdicts tool call (with a text-JSON fallback).
 """
 
 from __future__ import annotations
@@ -15,36 +20,95 @@ from typing import Any
 
 import anthropic
 
+from sub_checker.agents.base import set_message_cache_breakpoint
 from sub_checker.models import CheckerResult, Finding, Manuscript, Severity, TokenUsage
+from sub_checker.tools.manuscript_tools import (
+    TOOL_GET_REFERENCE_LIST,
+    TOOL_READ_SECTION,
+    TOOL_SEARCH_TEXT,
+    get_reference_list,
+    read_section,
+    search_text,
+)
 
 logger = logging.getLogger("sub_checker.harness.reviewer")
 
-# Findings per review request. Keeps each verdict JSON well within max_tokens
-# so a truncated response can't silently drop the whole batch.
+# Findings per review conversation. Keeps each verdict set small enough that
+# one bad response only affects its own batch.
 _BATCH_SIZE = 25
 _MAX_TOKENS = 8192
-_MANUSCRIPT_PREVIEW_CHARS = 8000
+_MAX_ITERATIONS = 12  # tool-use rounds per batch before forcing a verdict
+_MANUSCRIPT_PREVIEW_CHARS = 4000
+
+_SUBMIT_VERDICTS_TOOL = {
+    "name": "submit_verdicts",
+    "description": (
+        "Submit your final verdict for every finding in this batch. "
+        "Call this exactly once, after you have verified the findings "
+        "against the manuscript."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "verdicts": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "index": {
+                            "type": "integer",
+                            "description": "The finding's index as given in the input",
+                        },
+                        "action": {
+                            "type": "string",
+                            "enum": ["confirm", "downgrade", "filter"],
+                        },
+                        "confidence": {
+                            "type": "number",
+                            "description": "0.0-1.0, your confidence the finding is valid",
+                        },
+                        "reason": {
+                            "type": "string",
+                            "description": "Brief explanation (1-2 sentences)",
+                        },
+                    },
+                    "required": ["index", "action", "confidence", "reason"],
+                },
+            }
+        },
+        "required": ["verdicts"],
+    },
+}
 
 _SYSTEM_PROMPT = """\
 You are a rigorous post-validation reviewer for an academic manuscript checker.
 
 Your job: review EVERY finding produced by the checker agents and determine if
-each finding is correct, by cross-referencing against the actual manuscript text.
+each finding is correct, by cross-referencing against the actual manuscript.
 
-## Rules
+## Tools
 
-1. You will receive the manuscript text and a list of findings in JSON format.
-2. For EACH finding, output a JSON verdict with:
-   - "index": the finding's index (as given in the input)
-   - "action": one of "confirm", "downgrade", "filter"
-   - "confidence": 0.0 to 1.0 (your confidence the finding is valid)
-   - "reason": brief explanation (1-2 sentences)
+You have direct access to the manuscript:
+- read_section: read any section in full
+- search_text: find where a phrase/keyword appears
+- get_reference_list: read the full reference list
 
-3. Use "confirm" for findings that are correct and actionable.
-4. Use "downgrade" for findings that have some merit but are exaggerated,
-   imprecise, or should be info-level instead of error/warning.
-5. Use "filter" for findings that are factually wrong, self-contradictory,
-   or based on incorrect premises.
+A short text preview is included below for orientation, but it is TRUNCATED.
+Before you "filter" any finding, verify it against the actual manuscript with
+these tools — do not judge from the preview alone. A wrongly filtered real
+finding is worse than a confirmed false positive (the user can dismiss noise,
+but never sees what you filtered).
+
+## Verdicts
+
+For EACH finding, decide:
+- "confirm": correct and actionable
+- "downgrade": some merit but exaggerated, imprecise, or should be info-level
+- "filter": factually wrong, self-contradictory, or based on incorrect
+  premises — only after tool-verified evidence
+
+Findings already marked validation_status="downgraded" were flagged by
+deterministic heuristics as probably wrong — double-check those specifically.
 
 ## Common false positive patterns to watch for
 
@@ -56,41 +120,27 @@ each finding is correct, by cross-referencing against the actual manuscript text
 - Flagging standalone heading words (e.g., "Methods") as misplaced text
 - Reporting Word auto-numbering as missing reference numbering
 
-## Output format
+## Output
 
-Return a JSON array of verdicts, one per finding. Example:
-```json
-[
-  {"index": 0, "action": "confirm", "confidence": 0.95, "reason": "IRB number is indeed a placeholder"},
-  {"index": 1, "action": "filter", "confidence": 0.1, "reason": "Nov 2025 is past, not future"},
-  {"index": 2, "action": "downgrade", "confidence": 0.5, "reason": "Minor style preference, not an error"}
-]
-```
-
-IMPORTANT: Review ALL findings. Do not skip any. Output ONLY the JSON array."""
+When you have reviewed all findings, call submit_verdicts ONCE with a verdict
+for EVERY finding in the batch. Do not skip any."""
 
 
 def _manuscript_context(manuscript: Manuscript) -> str:
-    """Shared manuscript context block (truncated to avoid token overflow)."""
-    header = manuscript.header_text[:500] if manuscript.header_text else ""
+    """Orientation context; the reviewer uses tools for anything beyond this."""
     sections = [s.heading for s in manuscript.sections]
-    raw_preview = manuscript.raw_text[:_MANUSCRIPT_PREVIEW_CHARS]
-
     return (
         f"## Manuscript Context\n\n"
         f"Title: {manuscript.title}\n"
         f"Sections: {sections}\n"
-        f"Header:\n{header}\n\n"
-        f"Text preview (first {_MANUSCRIPT_PREVIEW_CHARS} chars):\n{raw_preview}\n\n"
-        f"Has references: {manuscript.reference_section is not None}\n"
-        f"Reference preview: {(manuscript.reference_section or '')[:500]}\n"
+        f"Has references: {manuscript.reference_section is not None}\n\n"
+        f"Text preview (TRUNCATED at {_MANUSCRIPT_PREVIEW_CHARS} chars — "
+        f"use tools for the rest):\n"
+        f"{manuscript.raw_text[:_MANUSCRIPT_PREVIEW_CHARS]}\n"
     )
 
 
-def _build_review_message(
-    context: str,
-    batch: list[tuple[int, Finding]],
-) -> str:
+def _build_review_message(context: str, batch: list[tuple[int, Finding]]) -> str:
     """Build the review prompt for one batch of (global_index, finding)."""
     findings_json: list[dict[str, Any]] = [
         {
@@ -100,6 +150,8 @@ def _build_review_message(
             "message": f.message,
             "location": f.location,
             "suggestion": f.suggestion,
+            "validation_status": f.validation_status,
+            "validation_note": f.validation_note,
         }
         for idx, f in batch
     ]
@@ -108,27 +160,105 @@ def _build_review_message(
         f"{context}\n"
         f"## Findings to Review ({len(findings_json)} total)\n\n"
         f"```json\n{json.dumps(findings_json, ensure_ascii=False, indent=2)}\n```\n\n"
-        f"Review each finding and return a JSON array of verdicts."
+        f"Verify each finding against the manuscript (use your tools), then "
+        f"call submit_verdicts with a verdict for every finding."
     )
 
 
-def _parse_verdicts(text: str) -> list[dict[str, Any]]:
-    """Extract the verdict JSON array from the response text."""
+def _parse_text_verdicts(text: str) -> list[dict[str, Any]]:
+    """Fallback: extract a verdict JSON array from plain response text."""
     json_match = text
     if "```" in text:
         m = re.search(r"```(?:json)?\s*\n?(.*?)```", text, re.DOTALL)
         if m:
             json_match = m.group(1)
-
     try:
         verdicts = json.loads(json_match)
     except json.JSONDecodeError:
-        logger.error("Reviewer returned invalid JSON: %s", text[:500])
         return []
+    return verdicts if isinstance(verdicts, list) else []
 
-    if not isinstance(verdicts, list):
-        logger.error("Reviewer returned non-list: %s", type(verdicts))
-        return []
+
+async def _review_batch(
+    client: anthropic.AsyncAnthropic,
+    model: str,
+    manuscript: Manuscript,
+    context: str,
+    batch: list[tuple[int, Finding]],
+    usage: TokenUsage,
+) -> list[dict[str, Any]]:
+    """Run one agentic review conversation; returns the verdict list."""
+    tools = [TOOL_READ_SECTION, TOOL_SEARCH_TEXT, TOOL_GET_REFERENCE_LIST, _SUBMIT_VERDICTS_TOOL]
+    tools = json.loads(json.dumps(tools))  # deep copy before adding cache marker
+    tools[-1]["cache_control"] = {"type": "ephemeral"}
+    system_blocks = [
+        {"type": "text", "text": _SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}
+    ]
+    messages: list[dict[str, Any]] = [
+        {
+            "role": "user",
+            "content": [{"type": "text", "text": _build_review_message(context, batch)}],
+        }
+    ]
+
+    verdicts: list[dict[str, Any]] = []
+
+    for iteration in range(1, _MAX_ITERATIONS + 1):
+        set_message_cache_breakpoint(messages)  # type: ignore[arg-type]
+        response = await client.messages.create(
+            model=model,
+            max_tokens=_MAX_TOKENS,
+            system=system_blocks,  # type: ignore[arg-type]
+            tools=tools,
+            messages=messages,  # type: ignore[arg-type]
+        )
+
+        usage.input_tokens += response.usage.input_tokens
+        usage.output_tokens += response.usage.output_tokens
+        usage.cache_creation_input_tokens += response.usage.cache_creation_input_tokens or 0
+        usage.cache_read_input_tokens += response.usage.cache_read_input_tokens or 0
+
+        if response.stop_reason == "max_tokens":
+            logger.warning("Reviewer response truncated (max_tokens) on iteration %d", iteration)
+
+        tool_results = []
+        for block in response.content:
+            if block.type != "tool_use":
+                continue
+            tool_input = block.input if isinstance(block.input, dict) else {}
+            if block.name == "submit_verdicts":
+                submitted = tool_input.get("verdicts", [])
+                if isinstance(submitted, list):
+                    verdicts.extend(submitted)
+                    result = f"Recorded {len(submitted)} verdicts."
+                else:
+                    result = "Invalid verdicts payload: expected an array."
+            elif block.name == "read_section":
+                result = read_section(manuscript, str(tool_input.get("section_name", "")))
+            elif block.name == "search_text":
+                result = search_text(manuscript, str(tool_input.get("query", "")))
+            elif block.name == "get_reference_list":
+                result = get_reference_list(manuscript)
+            else:
+                result = f"Unknown tool: {block.name}"
+            tool_results.append({"type": "tool_result", "tool_use_id": block.id, "content": result})
+
+        if verdicts:
+            return verdicts
+
+        if not tool_results:
+            # No tool call — the model may have answered with raw JSON text
+            text = "".join(
+                block.text  # type: ignore[union-attr]
+                for block in response.content
+                if block.type == "text"
+            )
+            return _parse_text_verdicts(text)
+
+        messages.append({"role": "assistant", "content": response.content})
+        messages.append({"role": "user", "content": tool_results})
+
+    logger.warning("Reviewer hit max iterations (%d) without verdicts", _MAX_ITERATIONS)
     return verdicts
 
 
@@ -140,10 +270,10 @@ async def run_reviewer(
     """Run the reviewer agent to validate all findings.
 
     Modifies findings in-place with confidence scores and validation status.
-    Findings marked as "filtered" by deterministic checks are skipped.
-    Findings are reviewed in batches so one truncated/invalid response only
-    affects its own batch.
-    Returns (results, token_usage).
+    Findings marked as "filtered" by deterministic checks are skipped;
+    findings "downgraded" by deterministic heuristics are re-reviewed.
+    Findings are processed in batches so one bad response only affects its
+    own batch. Returns (results, token_usage).
     """
     usage = TokenUsage()
 
@@ -171,37 +301,20 @@ async def run_reviewer(
             (batch_start + j, f)
             for j, f in enumerate(findings[batch_start : batch_start + _BATCH_SIZE])
         ]
-        message = _build_review_message(context, batch)
 
         try:
-            response = await client.messages.create(
-                model=model,
-                max_tokens=_MAX_TOKENS,
-                system=_SYSTEM_PROMPT,
-                messages=[{"role": "user", "content": message}],
-            )
+            verdicts = await _review_batch(client, model, manuscript, context, batch, usage)
         except Exception as e:
             logger.error("Reviewer agent failed on batch %d: %s", batch_start, e)
             continue  # leave this batch's findings as-is, don't block output
 
-        usage.input_tokens += response.usage.input_tokens
-        usage.output_tokens += response.usage.output_tokens
-        usage.cache_creation_input_tokens += response.usage.cache_creation_input_tokens or 0
-        usage.cache_read_input_tokens += response.usage.cache_read_input_tokens or 0
+        if not verdicts:
+            logger.warning("Reviewer returned no verdicts for batch %d", batch_start)
+            continue
 
-        if response.stop_reason == "max_tokens":
-            logger.warning(
-                "Reviewer response truncated (max_tokens) on batch %d; verdicts may be incomplete",
-                batch_start,
-            )
-
-        text = "".join(
-            block.text  # type: ignore[union-attr]
-            for block in response.content
-            if block.type == "text"
-        )
-
-        for verdict in _parse_verdicts(text):
+        for verdict in verdicts:
+            if not isinstance(verdict, dict):
+                continue
             idx = verdict.get("index")
             action = verdict.get("action", "confirm")
             confidence = verdict.get("confidence", 0.5)
@@ -211,7 +324,10 @@ async def run_reviewer(
                 continue
 
             finding = findings[idx]
-            finding.confidence = float(confidence)
+            try:
+                finding.confidence = float(confidence)
+            except (TypeError, ValueError):
+                finding.confidence = 0.5
             finding.validation_note = f"[reviewer] {reason}"
 
             if action == "filter":
@@ -220,10 +336,17 @@ async def run_reviewer(
                 filtered += 1
             elif action == "downgrade":
                 finding.validation_status = "downgraded"
+                if finding.original_severity is None:
+                    finding.original_severity = finding.severity
                 finding.severity = Severity.INFO
                 downgraded += 1
             else:
                 finding.validation_status = "confirmed"
+                # If a deterministic heuristic downgraded this finding but the
+                # reviewer verified it's real, restore its original severity.
+                if finding.original_severity is not None:
+                    finding.severity = finding.original_severity
+                    finding.original_severity = None
                 confirmed += 1
 
     elapsed = time.monotonic() - start
