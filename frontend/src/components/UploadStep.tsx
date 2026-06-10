@@ -24,9 +24,13 @@ export default function UploadStep({ onUploaded, lang }: Props) {
       form.append("file", file);
       try {
         const res = await fetch("/api/upload", { method: "POST", body: form });
-        const data = await res.json();
-        if (data.error) {
-          setError(data.error);
+        const data = await res.json().catch(() => null);
+        if (!res.ok || !data) {
+          setError(
+            data?.detail ??
+              data?.error ??
+              (zh ? `上傳失敗 (${res.status})` : `Upload failed (${res.status})`)
+          );
         } else {
           onUploaded(data);
         }

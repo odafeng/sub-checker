@@ -68,6 +68,7 @@ export default function RunningStep({ progress, lang }: Props) {
   const started = new Set<string>();
   const done = new Map<string, { findings: number; elapsed: number }>();
   const errors = new Map<string, string>();
+  const globalErrors: string[] = [];
 
   for (const p of progress) {
     if (p.type === "agent_start" && p.agent) started.add(p.agent);
@@ -75,9 +76,22 @@ export default function RunningStep({ progress, lang }: Props) {
       done.set(p.agent, { findings: p.findings_count ?? 0, elapsed: p.elapsed ?? 0 });
     if (p.type === "agent_error" && p.agent)
       errors.set(p.agent, p.error ?? "Unknown error");
+    if (p.type === "error") globalErrors.push(p.error ?? p.message ?? "Unknown error");
   }
 
-  const activeCheckers = CHECKERS.filter((c) => started.has(c.name));
+  const known = new Map(CHECKERS.map((c) => [c.name, c]));
+  // Render every started agent, even ones not in the hardcoded list, so a
+  // new backend checker still shows up instead of silently disappearing.
+  const activeCheckers = [...started].map(
+    (name) =>
+      known.get(name) ?? {
+        name,
+        en: name.replace(/_/g, " "),
+        zh: name,
+        icon: "•",
+        color: "#8b90a5",
+      }
+  );
   const doneCount = done.size + errors.size;
   const totalCount = started.size;
   const pct = totalCount > 0 ? Math.round((doneCount / totalCount) * 100) : 0;
@@ -115,6 +129,15 @@ export default function RunningStep({ progress, lang }: Props) {
           </p>
         </div>
       </div>
+
+      {/* Global errors (connection failures etc.) */}
+      {globalErrors.length > 0 && (
+        <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-[var(--error)]">
+          {globalErrors.map((msg, i) => (
+            <p key={`${msg}-${i}`}>{msg}</p>
+          ))}
+        </div>
+      )}
 
       {/* Agent cards */}
       <div className="grid gap-3">

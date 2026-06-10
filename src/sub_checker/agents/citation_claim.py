@@ -120,7 +120,7 @@ class CitationClaimAgent(BaseCheckerAgent):
             max_concurrent=config.claim.max_concurrent_pubmed,
         )
         self._s2 = SemanticScholarClient(max_concurrent=3)
-        crossref = CrossrefClient(max_concurrent=3)
+        crossref = CrossrefClient(max_concurrent=3, mailto=config.claim.pubmed_email)
 
         try:
             # Run multi-source verification as harness pre-pass

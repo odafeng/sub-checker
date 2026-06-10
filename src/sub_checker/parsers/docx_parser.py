@@ -64,8 +64,9 @@ def parse_docx(docx_path: Path, figure_dir: Path | None = None) -> Manuscript:
                     level = int(ch)
                     break
 
-            if is_ref_heading:
-                in_references = True
+            # Track whether we're inside the reference list: a non-reference
+            # heading (e.g. "Figure Legends" after "References") ends it.
+            in_references = is_ref_heading
 
             current_section = Section(heading=text, level=level)
             sections.append(current_section)

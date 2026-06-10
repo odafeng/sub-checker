@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import UploadStep from "./components/UploadStep";
 import ConfigStep from "./components/ConfigStep";
 import RunningStep from "./components/RunningStep";
@@ -49,8 +49,21 @@ export interface AgentProgress {
   findings_count?: number;
   elapsed?: number;
   error?: string;
+  message?: string;
   phase?: number;
   agents?: string[];
+}
+
+// Skip duplicate per-agent lifecycle events (e.g. from network retries)
+function appendProgress(prev: AgentProgress[], msg: AgentProgress): AgentProgress[] {
+  const perAgentEvents = ["agent_start", "agent_done", "agent_error"];
+  if (
+    perAgentEvents.includes(msg.type) &&
+    prev.some((p) => p.type === msg.type && p.agent === msg.agent)
+  ) {
+    return prev;
+  }
+  return [...prev, msg];
 }
 
 export default function App() {
@@ -60,6 +73,18 @@ export default function App() {
   const [reportHtml, setReportHtml] = useState("");
   const [progress, setProgress] = useState<AgentProgress[]>([]);
   const [lang, setLang] = useState<"en" | "zh-TW">("en");
+  const wsRef = useRef<WebSocket | null>(null);
+
+  const closeWs = () => {
+    if (wsRef.current) {
+      wsRef.current.onclose = null;
+      wsRef.current.close();
+      wsRef.current = null;
+    }
+  };
+
+  // Close any open WebSocket when the component unmounts
+  useEffect(() => closeWs, []);
 
   const onUploaded = (info: ManuscriptInfo) => {
     setManuscript(info);
@@ -70,35 +95,57 @@ export default function App() {
     if (!manuscript) return;
     setStep("running");
     setProgress([]);
+    closeWs();
 
     const wsUrl = `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws/check/${manuscript.session_id}`;
     const ws = new WebSocket(wsUrl);
+    wsRef.current = ws;
 
     ws.onopen = () => {
       ws.send(JSON.stringify({ journal, checkers, lang }));
     };
 
     ws.onmessage = (e) => {
-      const msg = JSON.parse(e.data);
-      if (msg.type === "report") {
+      let msg: AgentProgress & { data?: ReportData; html?: string };
+      try {
+        msg = JSON.parse(e.data);
+      } catch {
+        setProgress((prev) =>
+          appendProgress(prev, { type: "error", error: "Received malformed message" })
+        );
+        return;
+      }
+      if (msg.type === "report" && msg.data) {
         setReport(msg.data);
-        setReportHtml(msg.html);
+        setReportHtml(msg.html ?? "");
         setStep("report");
-        ws.close();
+        closeWs();
       } else {
-        setProgress((prev) => [...prev, msg]);
+        setProgress((prev) => appendProgress(prev, msg));
       }
     };
 
     ws.onerror = () => {
-      setProgress((prev) => [
-        ...prev,
-        { type: "error", error: "WebSocket connection failed" },
-      ]);
+      setProgress((prev) =>
+        appendProgress(prev, { type: "error", error: "WebSocket connection failed" })
+      );
+    };
+
+    // Fires when the connection drops before a report arrives (server
+    // restart, network loss) — onclose is nulled on intentional close.
+    ws.onclose = () => {
+      wsRef.current = null;
+      setProgress((prev) =>
+        appendProgress(prev, {
+          type: "error",
+          error: "Connection closed before the check finished",
+        })
+      );
     };
   };
 
   const onReset = () => {
+    closeWs();
     setStep("upload");
     setManuscript(null);
     setReport(null);
@@ -124,7 +171,7 @@ export default function App() {
           <select
             value={lang}
             onChange={(e) => setLang(e.target.value as "en" | "zh-TW")}
-            className="bg-[var(--surface)] border border-[var(--border)] rounded-lg px-3 py-1.5 text-sm"
+            className="bg-[var(--surface)] border border-[var(--border)] rounded-lg px-3 py-1.5 text-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--accent)]"
           >
             <option value="en">English</option>
             <option value="zh-TW">繁體中文</option>

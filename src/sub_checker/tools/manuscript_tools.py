@@ -6,11 +6,17 @@ import re
 
 from sub_checker.models import Manuscript
 
+# Numbers at or above this are not plausible citation numbers \u2014 they are
+# years like (2023), page ranges like (1023-1045), or sample sizes.
+_MAX_CITATION_NUMBER = 999
+
 
 def extract_citation_numbers(raw_text: str) -> set[int]:
     """Deterministic extraction of all numbered citations from manuscript text.
 
     Handles: (1), [1], (1-3), [1-3], (1,2,5), (1, 2, 5), etc.
+    Year-like numbers such as (2023) and ranges with implausibly large
+    endpoints are excluded.
     Returns the set of all individual reference numbers found.
     """
     cited: set[int] = set()
@@ -21,10 +27,13 @@ def extract_citation_numbers(raw_text: str) -> set[int]:
             if "\u2013" in part or "-" in part:  # en dash or hyphen
                 rng = re.split(r"[\u2013-]", part)
                 if len(rng) == 2 and rng[0].strip().isdigit() and rng[1].strip().isdigit():
-                    for n in range(int(rng[0].strip()), int(rng[1].strip()) + 1):
-                        cited.add(n)
+                    lo, hi = int(rng[0].strip()), int(rng[1].strip())
+                    if lo <= hi <= _MAX_CITATION_NUMBER:
+                        cited.update(range(lo, hi + 1))
             elif part.isdigit():
-                cited.add(int(part))
+                n = int(part)
+                if n <= _MAX_CITATION_NUMBER:
+                    cited.add(n)
     return cited
 
 

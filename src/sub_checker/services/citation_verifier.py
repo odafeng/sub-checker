@@ -132,42 +132,22 @@ def _cross_validate(
     best_score = 0.0
     title_kw = ref_parsed["title_keywords"]
 
-    # Check PubMed
-    for r in pubmed_results:
-        title = r.get("title", "")
-        sim = _title_similarity(title_kw, title) if title_kw else 0.3
-        if sim > best_score:
-            best_score = sim
-            best_match = {"source": "pubmed", "pmid": r.get("pmid"), "title": title}
-        if sim > 0.4:
-            sources_found.append("pubmed")
-            break
+    sources: list[tuple[str, str, list[dict[str, Any]]]] = [
+        ("pubmed", "pmid", pubmed_results),
+        ("semantic_scholar", "doi", s2_results),
+        ("crossref", "doi", crossref_results),
+    ]
 
-    # Check Semantic Scholar
-    for r in s2_results:
-        title = r.get("title", "")
-        sim = _title_similarity(title_kw, title) if title_kw else 0.3
-        if sim > best_score:
-            best_score = sim
-            best_match = {
-                "source": "semantic_scholar",
-                "doi": r.get("doi"),
-                "title": title,
-            }
-        if sim > 0.4:
-            sources_found.append("semantic_scholar")
-            break
-
-    # Check Crossref
-    for r in crossref_results:
-        title = r.get("title", "")
-        sim = _title_similarity(title_kw, title) if title_kw else 0.3
-        if sim > best_score:
-            best_score = sim
-            best_match = {"source": "crossref", "doi": r.get("doi"), "title": title}
-        if sim > 0.4:
-            sources_found.append("crossref")
-            break
+    for source_name, id_key, source_results in sources:
+        for r in source_results:
+            title = r.get("title", "")
+            sim = _title_similarity(title_kw, title) if title_kw else 0.3
+            if sim > best_score:
+                best_score = sim
+                best_match = {"source": source_name, id_key: r.get(id_key), "title": title}
+            if sim > 0.4:
+                sources_found.append(source_name)
+                break
 
     # Determine confidence and status
     n_sources = len(sources_found)

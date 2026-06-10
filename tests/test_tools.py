@@ -3,6 +3,7 @@
 from sub_checker.models import Manuscript
 from sub_checker.tools.filesystem_tools import check_file_exists, list_figures
 from sub_checker.tools.manuscript_tools import (
+    extract_citation_numbers,
     get_metadata,
     get_reference_list,
     read_paragraph,
@@ -67,3 +68,18 @@ def test_check_file_exists(sample_manuscript: Manuscript):
 def test_check_file_not_exists(sample_manuscript: Manuscript):
     result = check_file_exists(sample_manuscript, "Figure99.png")
     assert "NOT exist" in result
+
+
+def test_extract_citation_numbers_basic():
+    text = "First claim [1]. Second claim (2,3). Range [4-6] and en-dash (7–8)."  # noqa: RUF001
+    assert extract_citation_numbers(text) == {1, 2, 3, 4, 5, 6, 7, 8}
+
+
+def test_extract_citation_numbers_ignores_years():
+    text = "A study (2023) found X [1]. Earlier work (2010-2015) agrees [2,3]."
+    assert extract_citation_numbers(text) == {1, 2, 3}
+
+
+def test_extract_citation_numbers_ignores_large_page_ranges():
+    text = "See pages (1023-1045) for details; the claim itself is from [12]."
+    assert extract_citation_numbers(text) == {12}

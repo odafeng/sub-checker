@@ -24,6 +24,8 @@ class MockTextBlock:
 class MockUsage:
     input_tokens: int = 100
     output_tokens: int = 50
+    cache_creation_input_tokens: int = 0
+    cache_read_input_tokens: int = 0
 
 
 @dataclass

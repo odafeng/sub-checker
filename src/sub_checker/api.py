@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import contextlib
 import json
-import os
 import shutil
 import tempfile
 import time
@@ -12,11 +11,12 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 
 from sub_checker.config import Config
+from sub_checker.env import load_dotenv
 from sub_checker.i18n import checker_display_name
 from sub_checker.models import Manuscript, Report
 from sub_checker.orchestrator import build_report, create_agents, filter_agents, run_all_phases
@@ -24,21 +24,9 @@ from sub_checker.parsers.docx_parser import parse_docx
 from sub_checker.reporters.html_reporter import format_html
 from sub_checker.reporters.json_reporter import format_json
 
+load_dotenv()
 
-def _load_dotenv() -> None:
-    """Load .env from CWD or project root."""
-    for candidate in [Path.cwd() / ".env", Path(__file__).parent.parent.parent / ".env"]:
-        if candidate.exists():
-            for line in candidate.read_text().splitlines():
-                line = line.strip()
-                if not line or line.startswith("#") or "=" not in line:
-                    continue
-                key, _, value = line.partition("=")
-                os.environ.setdefault(key.strip(), value.strip())
-            break
-
-
-_load_dotenv()
+_MAX_UPLOAD_BYTES = 20 * 1024 * 1024  # 20 MB
 
 app = FastAPI(title="Sub-Checker API", version="0.1.0")
 
@@ -99,12 +87,19 @@ async def list_checkers() -> list[dict]:
 async def upload_manuscript(file: UploadFile) -> dict:
     """Upload a .docx file. Returns a session_id and parsed metadata."""
     if not file.filename or not file.filename.endswith(".docx"):
-        return {"error": "Please upload a .docx file"}
+        raise HTTPException(status_code=400, detail="Please upload a .docx file")
 
     # Sanitize filename before creating any temp resources
     safe_name = Path(file.filename).name
     if not safe_name or safe_name != file.filename.replace("\\", "/").split("/")[-1]:
-        return {"error": "Invalid filename"}
+        raise HTTPException(status_code=400, detail="Invalid filename")
+
+    content = await file.read()
+    if len(content) > _MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File too large (max {_MAX_UPLOAD_BYTES // (1024 * 1024)} MB)",
+        )
 
     session_id = uuid.uuid4().hex[:12]
     tmp_dir = Path(tempfile.mkdtemp(prefix=f"subcheck_{session_id}_"))
@@ -112,11 +107,11 @@ async def upload_manuscript(file: UploadFile) -> dict:
         docx_path = tmp_dir / safe_name
         if not docx_path.resolve().is_relative_to(tmp_dir.resolve()):
             raise ValueError("Invalid filename")
-        docx_path.write_bytes(await file.read())
+        docx_path.write_bytes(content)
         manuscript = parse_docx(docx_path, tmp_dir)
     except Exception as e:
         shutil.rmtree(tmp_dir, ignore_errors=True)
-        return {"error": f"Failed to process manuscript: {e}"}
+        raise HTTPException(status_code=422, detail=f"Failed to process manuscript: {e}") from e
 
     _cleanup_stale_sessions()
     _active_runs[session_id] = {
@@ -175,8 +170,14 @@ async def websocket_check(websocket: WebSocket, session_id: str) -> None:
         async def on_progress(event: str, agent_name: str, data: dict[str, Any]) -> None:
             await websocket.send_json({"type": event, "agent": agent_name, **data})
 
-        results = await run_all_phases(agents, manuscript, config, on_progress)
-        report = build_report(results, run_data["docx_path"], config.journal, model=config.model)
+        results, harness_usage = await run_all_phases(agents, manuscript, config, on_progress)
+        report = build_report(
+            results,
+            run_data["docx_path"],
+            config.journal,
+            model=config.model,
+            harness_usage=harness_usage,
+        )
 
         # Store report for later retrieval via REST endpoint
         _active_runs[session_id]["report"] = report

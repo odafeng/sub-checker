@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import copy
 import logging
 import time
 import uuid
 from abc import ABC, abstractmethod
 from datetime import UTC, datetime
+from functools import cached_property
 from pathlib import Path
 from typing import cast
 
@@ -23,6 +25,30 @@ from sub_checker.models import (
 
 logger = logging.getLogger("sub_checker.agents")
 
+# Safety cap on the agentic loop: prevents runaway token spend if the model
+# never reaches end_turn.
+MAX_ITERATIONS = 30
+
+
+def _set_message_cache_breakpoint(messages: list[MessageParam]) -> None:
+    """Mark the last content block of the last message with cache_control.
+
+    Moves the single message-level cache breakpoint forward each iteration so
+    the entire conversation prefix is served from the prompt cache. Combined
+    with the system + tools breakpoints this stays within the 4-breakpoint
+    API limit.
+    """
+    for msg in messages:
+        content = msg.get("content")
+        if isinstance(content, list):
+            for block in content:
+                if isinstance(block, dict):
+                    block.pop("cache_control", None)
+
+    last_content = messages[-1].get("content")
+    if isinstance(last_content, list) and last_content and isinstance(last_content[-1], dict):
+        last_content[-1]["cache_control"] = {"type": "ephemeral"}
+
 
 class BaseCheckerAgent(ABC):
     """Base class for all checker agents.
@@ -40,7 +66,7 @@ class BaseCheckerAgent(ABC):
         self._findings: list[Finding] = []
         self._token_usage = TokenUsage()
 
-    @property
+    @cached_property
     def system_prompt(self) -> str:
         prompt_path = Path(__file__).parent / "prompts" / f"{self.name}.txt"
         if prompt_path.exists():
@@ -132,29 +158,64 @@ class BaseCheckerAgent(ABC):
         logger.info("Starting agent '%s' (run_id=%s)", self.name, run_id)
 
         client = anthropic.AsyncAnthropic()
-        tools = cast(list[ToolParam], self.get_tools())
+        # Deep-copy: tool definitions are shared module constants and we add
+        # a cache_control marker to the last one (caches system + tools prefix).
+        tools = cast(list[ToolParam], copy.deepcopy(self.get_tools()))
+        if tools:
+            tools[-1]["cache_control"] = {"type": "ephemeral"}  # type: ignore[typeddict-unknown-key]
+        system_blocks = [
+            {
+                "type": "text",
+                "text": self.system_prompt,
+                "cache_control": {"type": "ephemeral"},
+            }
+        ]
         messages = cast(
             list[MessageParam],
-            [{"role": "user", "content": self._build_initial_message(manuscript, config)}],
+            [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": self._build_initial_message(manuscript, config),
+                        }
+                    ],
+                }
+            ],
         )
 
         iteration = 0
         try:
             while True:
                 iteration += 1
+                if iteration > MAX_ITERATIONS:
+                    logger.warning(
+                        "[%s] Hit max iterations (%d), stopping agent loop",
+                        self.name,
+                        MAX_ITERATIONS,
+                    )
+                    break
                 logger.debug("[%s] Iteration %d: sending API request", self.name, iteration)
                 cot.log_request(messages, tools)
+                _set_message_cache_breakpoint(messages)
 
                 response = await client.messages.create(
                     model=self.model,
                     max_tokens=4096,
-                    system=self.system_prompt,
+                    system=system_blocks,  # type: ignore[arg-type]
                     tools=tools,
                     messages=messages,
                 )
 
                 self._token_usage.input_tokens += response.usage.input_tokens
                 self._token_usage.output_tokens += response.usage.output_tokens
+                self._token_usage.cache_creation_input_tokens += (
+                    response.usage.cache_creation_input_tokens or 0
+                )
+                self._token_usage.cache_read_input_tokens += (
+                    response.usage.cache_read_input_tokens or 0
+                )
                 cot.log_response(str(response.stop_reason), response.content)
 
                 if response.stop_reason == "end_turn":

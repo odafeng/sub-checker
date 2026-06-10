@@ -1,31 +1,17 @@
 from __future__ import annotations
 
 import asyncio
-import os
 from pathlib import Path
 
 import click
 from rich.console import Console
 
-from sub_checker.config import DEFAULT_CONFIG_YAML, Config, load_config
+from sub_checker.config import DEFAULT_CONFIG_YAML, load_config
+from sub_checker.env import load_dotenv
 from sub_checker.logging_config import setup_logging
 from sub_checker.models import Severity
 from sub_checker.parsers.docx_parser import parse_docx
 from sub_checker.pipeline import run_pipeline
-
-
-def _load_dotenv() -> None:
-    """Load .env file from CWD or project root if it exists."""
-    for candidate in [Path.cwd() / ".env", Path(__file__).parent.parent.parent / ".env"]:
-        if candidate.exists():
-            for line in candidate.read_text().splitlines():
-                line = line.strip()
-                if not line or line.startswith("#") or "=" not in line:
-                    continue
-                key, _, value = line.partition("=")
-                os.environ.setdefault(key.strip(), value.strip())
-            break
-
 
 ALL_CHECKER_NAMES = ["typo", "logic", "figure", "citation", "format", "guidelines", "claim"]
 
@@ -52,13 +38,6 @@ def _resolve_names(names: str | None) -> set[str] | None:
         else:
             result.add(n)
     return result
-
-
-def _create_agents(config: Config) -> list:
-    """Create all checker agents via shared orchestrator."""
-    from sub_checker.orchestrator import create_agents
-
-    return create_agents(config)
 
 
 @click.command()
@@ -102,7 +81,7 @@ def main(
     lang: str,
 ) -> None:
     """Check a manuscript before journal submission."""
-    _load_dotenv()
+    load_dotenv()
     console = Console()
 
     # Initialize logging
@@ -156,7 +135,9 @@ def main(
         return
 
     # Run pipeline
-    agents = _create_agents(config)
+    from sub_checker.orchestrator import create_agents
+
+    agents = create_agents(config)
     report = asyncio.run(
         run_pipeline(
             manuscript,

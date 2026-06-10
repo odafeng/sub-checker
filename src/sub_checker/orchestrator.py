@@ -13,9 +13,36 @@ from typing import Any
 
 from sub_checker.agents.base import BaseCheckerAgent
 from sub_checker.config import Config
-from sub_checker.models import CheckerResult, Finding, Manuscript, Report, Severity
+from sub_checker.models import CheckerResult, Finding, Manuscript, Report, Severity, TokenUsage
 
 logger = logging.getLogger("sub_checker.orchestrator")
+
+# (input, output) USD per million tokens, matched by substring of the model name.
+# Cache writes cost 1.25x input; cache reads cost 0.1x input.
+_MODEL_PRICING: list[tuple[str, float, float]] = [
+    ("opus", 5.0, 25.0),
+    ("sonnet", 3.0, 15.0),
+    ("haiku", 1.0, 5.0),
+]
+_DEFAULT_PRICING = (5.0, 25.0)
+
+
+def _pricing_for(model: str) -> tuple[float, float]:
+    for key, inp, out in _MODEL_PRICING:
+        if key in model.lower():
+            return (inp, out)
+    return _DEFAULT_PRICING
+
+
+def _usage_cost(usage: TokenUsage, model: str) -> float:
+    inp, out = _pricing_for(model)
+    return (
+        usage.input_tokens * inp
+        + usage.cache_creation_input_tokens * inp * 1.25
+        + usage.cache_read_input_tokens * inp * 0.1
+        + usage.output_tokens * out
+    ) / 1_000_000
+
 
 # Phase definitions: which agents run in parallel within each phase
 PHASE_GROUPS: list[set[str]] = [
@@ -106,18 +133,22 @@ def build_report(
     manuscript_path: str,
     journal: str | None,
     model: str = "",
+    harness_usage: TokenUsage | None = None,
 ) -> Report:
-    """Build a Report from checker results. Single source of truth for cost calculation."""
+    """Build a Report from checker results. Single source of truth for cost calculation.
+
+    harness_usage: token usage from post-validation (reviewer agent), counted
+    into total_cost but not attributed to any single checker.
+    """
     summary: dict[Severity, int] = {s: 0 for s in Severity}
     total_cost = 0.0
     for r in results:
         for f in r.findings:
             if f.validation_status != "filtered":
                 summary[f.severity] = summary.get(f.severity, 0) + 1
-        # Opus 4.8 pricing: $5/M input, $25/M output
-        total_cost += (
-            r.token_usage.input_tokens * 5 + r.token_usage.output_tokens * 25
-        ) / 1_000_000
+        total_cost += _usage_cost(r.token_usage, model)
+    if harness_usage:
+        total_cost += _usage_cost(harness_usage, model)
 
     return Report(
         manuscript_path=manuscript_path,
@@ -135,12 +166,15 @@ async def run_all_phases(
     manuscript: Manuscript,
     config: Config,
     on_progress: AgentCallback | None = None,
-) -> list[CheckerResult]:
+) -> tuple[list[CheckerResult], TokenUsage]:
     """Execute agents in phased order, then run Phase 3 post-validation.
 
     Phase 1-2-3: Agent execution (parallel within each phase)
     Phase 4: Deterministic post-validation (filter obvious false positives)
     Phase 5: Reviewer agent (LLM-based validation of remaining findings)
+
+    Returns (results, harness_usage) where harness_usage is the reviewer
+    agent's token usage (for cost accounting).
     """
     from sub_checker.harness.deterministic import run_deterministic_checks
     from sub_checker.harness.reviewer import run_reviewer
@@ -181,13 +215,14 @@ async def run_all_phases(
         )
 
     # --- Phase 5: Reviewer agent ---
+    harness_usage = TokenUsage()
     remaining = total_before - filtered_det
     if remaining > 0:
         if on_progress:
             await on_progress("phase_start", "", {"phase": 5, "agents": ["reviewer"]})
             await on_progress("agent_start", "reviewer", {})
 
-        results = await run_reviewer(manuscript, results, model=config.model)
+        results, harness_usage = await run_reviewer(manuscript, results, model=config.model)
 
         if on_progress:
             confirmed = sum(
@@ -203,4 +238,4 @@ async def run_all_phases(
                 {"confirmed": confirmed, "filtered": filtered_rev, "elapsed": 0.0},
             )
 
-    return results
+    return results, harness_usage

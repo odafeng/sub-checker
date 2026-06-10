@@ -6,43 +6,31 @@ This client enforces rate limiting and retries on 429/5xx errors.
 
 from __future__ import annotations
 
-import asyncio
-import logging
-import time
 from typing import Any
 
-import httpx
+from sub_checker.services.http_client import RateLimitedClient
 
 ESEARCH_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
+ESUMMARY_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi"
 EFETCH_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi"
 
-logger = logging.getLogger("sub_checker.services.pubmed")
 
-_MAX_RETRIES = 3
-_RETRY_BACKOFF = (1.0, 3.0, 8.0)  # seconds
+class PubMedClient(RateLimitedClient):
+    service_name = "pubmed"
 
-
-class PubMedClient:
     def __init__(
         self,
         email: str | None = None,
         api_key: str | None = None,
         max_concurrent: int = 3,
     ):
+        super().__init__(
+            min_interval=0.12 if api_key else 0.35,  # ~8/sec or ~3/sec
+            max_concurrent=max_concurrent,
+        )
         self.email = email
         self.api_key = api_key
-        self._semaphore = asyncio.Semaphore(max_concurrent)
         self._abstract_cache: dict[str, str] = {}
-        self._client: httpx.AsyncClient | None = None
-        # Rate limit: min interval between requests
-        self._min_interval = 0.12 if api_key else 0.35  # ~8/sec or ~3/sec
-        self._last_request_time = 0.0
-        self._rate_lock = asyncio.Lock()
-
-    async def _get_client(self) -> httpx.AsyncClient:
-        if self._client is None:
-            self._client = httpx.AsyncClient(timeout=30.0)
-        return self._client
 
     def _base_params(self) -> dict[str, str]:
         params: dict[str, str] = {"retmode": "json"}
@@ -51,51 +39,6 @@ class PubMedClient:
         if self.api_key:
             params["api_key"] = self.api_key
         return params
-
-    async def _rate_limited_get(self, url: str, params: dict[str, str]) -> httpx.Response:
-        """GET with rate limiting and retry on 429/5xx."""
-        client = await self._get_client()
-
-        for attempt in range(_MAX_RETRIES):
-            # Enforce rate limit
-            async with self._rate_lock:
-                now = time.monotonic()
-                wait = self._min_interval - (now - self._last_request_time)
-                if wait > 0:
-                    await asyncio.sleep(wait)
-                self._last_request_time = time.monotonic()
-
-            async with self._semaphore:
-                try:
-                    resp = await client.get(url, params=params)
-                    if resp.status_code == 429 or resp.status_code >= 500:
-                        backoff = _RETRY_BACKOFF[min(attempt, len(_RETRY_BACKOFF) - 1)]
-                        logger.warning(
-                            "PubMed %d on attempt %d, retrying in %.1fs: %s",
-                            resp.status_code,
-                            attempt + 1,
-                            backoff,
-                            url,
-                        )
-                        await asyncio.sleep(backoff)
-                        continue
-                    resp.raise_for_status()
-                    return resp
-                except httpx.HTTPError as e:
-                    if attempt < _MAX_RETRIES - 1:
-                        backoff = _RETRY_BACKOFF[min(attempt, len(_RETRY_BACKOFF) - 1)]
-                        logger.warning(
-                            "PubMed request failed (attempt %d): %s, retrying in %.1fs",
-                            attempt + 1,
-                            e,
-                            backoff,
-                        )
-                        await asyncio.sleep(backoff)
-                    else:
-                        raise
-
-        # Should not reach here, but satisfy type checker
-        raise httpx.HTTPError("Max retries exceeded")  # type: ignore[call-arg]
 
     async def search(
         self, author: str, year: str, title_keywords: str = "", max_results: int = 5
@@ -119,13 +62,24 @@ class PubMedClient:
         if not id_list:
             return []
 
-        # Fetch summaries
-        results = []
-        for pmid in id_list:
-            abstract = await self.get_abstract(pmid)
-            title_line = abstract.split("\n")[0] if abstract else pmid
-            results.append({"pmid": pmid, "title": title_line})
-        return results
+        # Fetch all titles in a single esummary request (avoids one efetch per PMID)
+        titles = await self._get_titles(id_list)
+        return [{"pmid": pmid, "title": titles.get(pmid, pmid)} for pmid in id_list]
+
+    async def _get_titles(self, pmids: list[str]) -> dict[str, str]:
+        """Fetch titles for multiple PMIDs in one esummary call."""
+        params = {
+            **self._base_params(),
+            "db": "pubmed",
+            "id": ",".join(pmids),
+        }
+        resp = await self._rate_limited_get(ESUMMARY_URL, params)
+        result = resp.json().get("result", {})
+        return {
+            pmid: result[pmid].get("title", pmid)
+            for pmid in pmids
+            if isinstance(result.get(pmid), dict)
+        }
 
     async def get_abstract(self, pmid: str) -> str:
         """Fetch abstract for a given PMID."""
@@ -144,8 +98,3 @@ class PubMedClient:
         text = resp.text.strip()
         self._abstract_cache[pmid] = text
         return text
-
-    async def close(self) -> None:
-        if self._client:
-            await self._client.aclose()
-            self._client = None

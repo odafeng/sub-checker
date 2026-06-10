@@ -17,15 +17,21 @@ export default function ConfigStep({ manuscript, onStart, lang }: Props) {
   const [journal, setJournal] = useState("");
   const [checkers, setCheckers] = useState<Checker[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [loadError, setLoadError] = useState(false);
   const zh = lang === "zh-TW";
 
   useEffect(() => {
     fetch("/api/checkers")
-      .then((r) => r.json())
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      })
       .then((data: Checker[]) => {
         setCheckers(data);
         setSelected(new Set(data.map((c) => c.name)));
-      });
+        setLoadError(false);
+      })
+      .catch(() => setLoadError(true));
   }, []);
 
   const toggle = (name: string) => {
@@ -85,6 +91,7 @@ export default function ConfigStep({ manuscript, onStart, lang }: Props) {
               : 'e.g. "The Lancet", "Nature Medicine"'
           }
           value={journal}
+          maxLength={200}
           onChange={(e) => setJournal(e.target.value)}
           className="w-full bg-[var(--bg)] border border-[var(--border)] rounded-xl px-4 py-2.5 text-sm focus:border-[var(--accent)] outline-none"
         />
@@ -115,6 +122,13 @@ export default function ConfigStep({ manuscript, onStart, lang }: Props) {
               : "Select All"}
           </button>
         </div>
+        {loadError && (
+          <p className="text-sm text-[var(--error)] mb-3">
+            {zh
+              ? "無法載入檢查項目清單，請重新整理頁面"
+              : "Failed to load checker list — please reload the page"}
+          </p>
+        )}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
           {checkers.map((c) => (
             <label

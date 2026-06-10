@@ -120,9 +120,9 @@ export default function ReportStep({ report, reportHtml, lang }: Props) {
             cls: "text-white",
           },
           { n: `$${report.total_cost.toFixed(2)}`, label: zh ? "費用" : "Cost", cls: "text-[var(--success)]" },
-        ].map((c, i) => (
+        ].map((c) => (
           <div
-            key={i}
+            key={c.label}
             className="bg-[var(--surface)] border border-[var(--border)] rounded-xl p-4 text-center"
           >
             <div className={`text-2xl font-bold font-mono ${c.cls}`}>
@@ -218,7 +218,7 @@ export default function ReportStep({ report, reportHtml, lang }: Props) {
                     </p>
                   ) : (
                     r.findings.map((f, i) => (
-                      <FindingRow key={i} f={f} lang={lang} />
+                      <FindingRow key={`${r.checker}-${i}`} f={f} lang={lang} />
                     ))
                   )}
                 </div>
@@ -229,6 +229,8 @@ export default function ReportStep({ report, reportHtml, lang }: Props) {
       ) : (
         <iframe
           srcDoc={reportHtml}
+          // Fully sandboxed: report HTML must not run scripts or reach the parent page
+          sandbox=""
           className="w-full rounded-xl border border-[var(--border)]"
           style={{ height: "80vh" }}
           title="HTML Report"

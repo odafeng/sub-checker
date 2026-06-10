@@ -57,11 +57,12 @@ async def run_pipeline(
             console.print(f"  [bold red]{agent_name} failed: {data.get('error')}[/bold red]")
 
     with progress:
-        results = await run_all_phases(active, manuscript, config, on_progress)
+        results, harness_usage = await run_all_phases(active, manuscript, config, on_progress)
 
     return build_report(
         results,
         manuscript_path=str(manuscript.figure_dir or ""),
         journal=config.journal,
         model=config.model,
+        harness_usage=harness_usage,
     )

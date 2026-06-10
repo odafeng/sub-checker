@@ -28,6 +28,8 @@ def format_json(report: Report) -> str:
             "token_usage": {
                 "input_tokens": r.token_usage.input_tokens,
                 "output_tokens": r.token_usage.output_tokens,
+                "cache_creation_input_tokens": r.token_usage.cache_creation_input_tokens,
+                "cache_read_input_tokens": r.token_usage.cache_read_input_tokens,
             },
             "findings": [
                 {
