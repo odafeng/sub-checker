@@ -65,6 +65,7 @@ Issues = "https://github.com/odafeng/sub-checker/issues"
 
 [project.scripts]
 sub-check = "sub_checker.cli:main"
+sub-check-eval = "sub_checker.eval_runner:main"
 
 # ── Ruff ──────────────────────────────────────────────
 [tool.ruff]

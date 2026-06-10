@@ -1,6 +1,9 @@
 # Secrets
 .env
 
+# Private evaluation manuscripts — never commit these
+eval/cases/
+
 # Python
 __pycache__/
 *.py[cod]
