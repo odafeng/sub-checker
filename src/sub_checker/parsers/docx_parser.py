@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import docx
@@ -30,6 +31,30 @@ _SECTION_HEADINGS = {
     "appendix",
 }
 
+# Real section headings are short. Authors sometimes apply a Heading style to
+# whole paragraphs (seen in real manuscripts: entire abstracts/discussion
+# paragraphs styled as headings) — treating those as headings would make the
+# text invisible to every checker, so anything longer is kept as content.
+_MAX_HEADING_WORDS = 25
+
+# Header lines that are submission metadata, not the manuscript title
+_METADATA_LINE = re.compile(
+    r"^(article\s+type|running\s+(head|title)|short\s+title|title\s+page|"
+    r"word\s+count|corresponding\s+author|authors?|affiliations?|keywords?)\b",
+    re.IGNORECASE,
+)
+
+
+def _pick_title(header_lines: list[str], sections: list[Section]) -> str:
+    """Choose the manuscript title: first non-metadata header line, else first heading."""
+    for line in header_lines:
+        if not _METADATA_LINE.match(line):
+            return line
+    for section in sections:
+        if not _METADATA_LINE.match(section.heading):
+            return section.heading
+    return header_lines[0] if header_lines else "Untitled"
+
 
 def parse_docx(docx_path: Path, figure_dir: Path | None = None) -> Manuscript:
     """Parse a .docx file into a Manuscript model."""
@@ -41,6 +66,7 @@ def parse_docx(docx_path: Path, figure_dir: Path | None = None) -> Manuscript:
     reference_section: str | None = None
     in_references = False
     ref_lines: list[str] = []
+    body_lines: list[str] = []  # Everything except the reference list
     header_lines: list[str] = []  # Text before first heading
     first_heading_seen = False
 
@@ -51,7 +77,9 @@ def parse_docx(docx_path: Path, figure_dir: Path | None = None) -> Manuscript:
 
         style = para.style
         style_name = ((style.name or "") if style else "").lower()
-        is_heading = "heading" in style_name
+        # A heading-styled paragraph that is actually a full paragraph of prose
+        # must be treated as content, or it disappears from raw_text entirely.
+        is_heading = "heading" in style_name and len(text.split()) <= _MAX_HEADING_WORDS
         is_ref_heading = text.lower() in _REFERENCE_HEADINGS
         is_abstract_heading = text.lower() in _ABSTRACT_HEADINGS
         is_section_heading = text.lower() in _SECTION_HEADINGS
@@ -88,15 +116,18 @@ def parse_docx(docx_path: Path, figure_dir: Path | None = None) -> Manuscript:
 
         if in_references:
             ref_lines.append(text)
+        else:
+            body_lines.append(text)
 
     if ref_lines:
         reference_section = "\n".join(ref_lines)
 
     raw_text = "\n".join(p.text for p in paragraphs)
     header_text = "\n".join(header_lines)
+    body_text = "\n".join(body_lines)
 
-    # Title: prefer first line before any heading; fall back to first heading
-    title = header_lines[0] if header_lines else (sections[0].heading if sections else "Untitled")
+    # Title: first non-metadata line before any heading; fall back to first heading
+    title = _pick_title(header_lines, sections)
 
     return Manuscript(
         title=title,
@@ -106,4 +137,5 @@ def parse_docx(docx_path: Path, figure_dir: Path | None = None) -> Manuscript:
         reference_section=reference_section,
         figure_dir=figure_dir,
         header_text=header_text,
+        body_text=body_text,
     )
