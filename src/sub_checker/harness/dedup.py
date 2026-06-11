@@ -54,9 +54,7 @@ def deduplicate_cross_checker(results: list[CheckerResult]) -> int:
     The highest-confidence finding in each duplicate group is kept; the rest
     are marked validation_status="filtered" (hidden from reports).
     """
-    active = [
-        f for r in results for f in r.findings if f.validation_status != "filtered"
-    ]
+    active = [f for r in results for f in r.findings if f.validation_status != "filtered"]
     # Highest confidence first so it becomes each group's representative.
     active.sort(key=lambda f: f.confidence, reverse=True)
 

@@ -33,8 +33,7 @@ MAX_ITERATIONS = 30
 def supports_adaptive_thinking(model: str) -> bool:
     """Adaptive thinking is available on Opus 4.6+ / Sonnet 4.6 / Fable 5."""
     return any(
-        marker in model
-        for marker in ("opus-4-6", "opus-4-7", "opus-4-8", "sonnet-4-6", "fable")
+        marker in model for marker in ("opus-4-6", "opus-4-7", "opus-4-8", "sonnet-4-6", "fable")
     )
 
 

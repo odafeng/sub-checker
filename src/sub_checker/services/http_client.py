@@ -81,8 +81,7 @@ class RateLimitedClient:
             self._circuit_open = True
             self._circuit_opened_at = time.monotonic()
             self._logger.warning(
-                "%s circuit breaker OPEN after %d consecutive 429s — "
-                "requests skipped for %.0fs",
+                "%s circuit breaker OPEN after %d consecutive 429s — requests skipped for %.0fs",
                 self.service_name,
                 self._consecutive_429s,
                 _CIRCUIT_BREAKER_COOLDOWN,

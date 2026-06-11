@@ -231,9 +231,7 @@ async def run_all_phases(
     results: list[CheckerResult] = list(await asyncio.gather(*[run_limited(a) for a in scheduled]))
 
     # --- Phase 2: Deterministic post-validation ---
-    await _notify(
-        on_progress, "phase_start", "", {"phase": 2, "agents": ["deterministic_check"]}
-    )
+    await _notify(on_progress, "phase_start", "", {"phase": 2, "agents": ["deterministic_check"]})
     await _notify(on_progress, "agent_start", "deterministic_check", {})
 
     total_before = sum(len(r.findings) for r in results)

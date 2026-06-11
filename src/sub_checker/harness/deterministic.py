@@ -59,8 +59,10 @@ def _parse_claimed_period(claimed: str) -> tuple[datetime, datetime] | None:
         if not (1 <= month <= 12):
             return None
         start = datetime(year, month, 1, tzinfo=UTC)
-        nxt = datetime(year + 1, 1, 1, tzinfo=UTC) if month == 12 else (
-            datetime(year, month + 1, 1, tzinfo=UTC)
+        nxt = (
+            datetime(year + 1, 1, 1, tzinfo=UTC)
+            if month == 12
+            else (datetime(year, month + 1, 1, tzinfo=UTC))
         )
     else:
         start = datetime(year, 1, 1, tzinfo=UTC)

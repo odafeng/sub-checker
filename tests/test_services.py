@@ -120,13 +120,17 @@ def test_cross_validate_nothing_found():
 
 # --- reference_entries / count_references ---
 
+
 def test_reference_entries_drops_table_contamination():
     from sub_checker.tools.manuscript_tools import count_references, reference_entries
 
     refs = "\n".join(
         [f"{i}. Author A, Author B. Title {i}. Journal. 2020;1:1-2." for i in range(1, 26)]
-        + ["Table 2. Treatment Effect Estimates", "Abbreviations: OW, overlap weighting",
-           "Hazard ratios are reported for Cox models."]
+        + [
+            "Table 2. Treatment Effect Estimates",
+            "Abbreviations: OW, overlap weighting",
+            "Hazard ratios are reported for Cox models.",
+        ]
     )
     assert count_references(refs) == 25
     assert len(reference_entries(refs)) == 25
@@ -141,19 +145,37 @@ def test_reference_entries_unnumbered_fallback():
 
 # --- cross-checker dedup ---
 
+
 def test_dedup_merges_same_ref_across_checkers():
     from sub_checker.harness.dedup import deduplicate_cross_checker
     from sub_checker.models import CheckerResult, Finding, Severity
 
     msg = "Reference [15] (Kish, Survey Sampling) has an incorrect DOI 10.1002/bimj"
-    a = Finding(checker="figure_table", severity=Severity.WARNING, message=msg,
-                ref_number=15, confidence=0.8, validation_status="confirmed")
-    b = Finding(checker="citation_format", severity=Severity.WARNING, message=msg + " prefix",
-                ref_number=15, confidence=0.82, validation_status="confirmed")
+    a = Finding(
+        checker="figure_table",
+        severity=Severity.WARNING,
+        message=msg,
+        ref_number=15,
+        confidence=0.8,
+        validation_status="confirmed",
+    )
+    b = Finding(
+        checker="citation_format",
+        severity=Severity.WARNING,
+        message=msg + " prefix",
+        ref_number=15,
+        confidence=0.82,
+        validation_status="confirmed",
+    )
     # genuinely different issue on the same ref must survive
-    c = Finding(checker="citation_exist", severity=Severity.WARNING,
-                message="Reference [15] bibliographic style uses a semicolon before the URL",
-                ref_number=15, confidence=0.8, validation_status="confirmed")
+    c = Finding(
+        checker="citation_exist",
+        severity=Severity.WARNING,
+        message="Reference [15] bibliographic style uses a semicolon before the URL",
+        ref_number=15,
+        confidence=0.8,
+        validation_status="confirmed",
+    )
     results = [CheckerResult(checker_name="x", findings=[a, b, c])]
     removed = deduplicate_cross_checker(results)
     assert removed == 1  # a and b merge; c is distinct
@@ -167,9 +189,21 @@ def test_dedup_keeps_within_checker_findings():
     from sub_checker.models import CheckerResult, Finding, Severity
 
     msg = "Reference [15] has an incorrect DOI"
-    a = Finding(checker="typo", severity=Severity.WARNING, message=msg, ref_number=15,
-                confidence=0.8, validation_status="confirmed")
-    b = Finding(checker="typo", severity=Severity.WARNING, message=msg, ref_number=15,
-                confidence=0.8, validation_status="confirmed")
+    a = Finding(
+        checker="typo",
+        severity=Severity.WARNING,
+        message=msg,
+        ref_number=15,
+        confidence=0.8,
+        validation_status="confirmed",
+    )
+    b = Finding(
+        checker="typo",
+        severity=Severity.WARNING,
+        message=msg,
+        ref_number=15,
+        confidence=0.8,
+        validation_status="confirmed",
+    )
     results = [CheckerResult(checker_name="x", findings=[a, b])]
     assert deduplicate_cross_checker(results) == 0  # same checker → not merged
