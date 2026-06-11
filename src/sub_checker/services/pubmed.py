@@ -44,9 +44,15 @@ class PubMedClient(RateLimitedClient):
         self, author: str, year: str, title_keywords: str = "", max_results: int = 5
     ) -> list[dict[str, Any]]:
         """Search PubMed and return list of {pmid, title}."""
-        query_parts = [f"{author}[Author]", f"{year}[Date - Publication]"]
+        query_parts = []
+        if author:
+            query_parts.append(f"{author}[Author]")
+        if year:
+            query_parts.append(f"{year}[Date - Publication]")
         if title_keywords:
             query_parts.append(f"{title_keywords}[Title]")
+        if not query_parts:
+            return []  # empty field terms make PubMed return errors/garbage
         query = " AND ".join(query_parts)
 
         params = {

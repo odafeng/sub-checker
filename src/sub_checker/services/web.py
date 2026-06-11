@@ -96,7 +96,9 @@ class WebService:
             resp.raise_for_status()
             text = self._extract_text(resp.text)
         except httpx.HTTPError as e:
-            text = f"Error fetching {url}: {e}"
+            # Do NOT cache failures — a transient timeout would otherwise
+            # poison this URL for the rest of the run.
+            return f"Error fetching {url}: {e}"
 
         self._page_cache[url] = text
         return text

@@ -7,6 +7,7 @@ Retries on 429/5xx with exponential backoff.
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 
@@ -25,7 +26,8 @@ def _parse_work(item: dict[str, Any]) -> dict[str, Any]:
         if name:
             authors.append(name)
     pub_date = item.get("published-print") or item.get("published-online") or {}
-    date_parts = pub_date.get("date-parts", [[None]])[0]
+    # Crossref occasionally returns "date-parts": [] — guard both levels.
+    date_parts = (pub_date.get("date-parts") or [[None]])[0]
     pub_year = date_parts[0] if date_parts else None
     titles = item.get("title", [])
     return {
@@ -60,7 +62,7 @@ class CrossrefClient(RateLimitedClient):
         query = f"{author} {title_keywords}".strip()
         cache_key = f"search:{query}:{year}"
         if cache_key in self._cache:
-            return self._cache[cache_key] or []
+            return self._cache[cache_key]
 
         params: dict[str, str] = {
             "query": query,
@@ -87,11 +89,16 @@ class CrossrefClient(RateLimitedClient):
 
         try:
             resp = await self._rate_limited_get(
-                f"{CROSSREF_WORKS_URL}/{doi}",
+                f"{CROSSREF_WORKS_URL}/{quote(doi, safe='/')}",
                 params={"select": _SELECT_FIELDS},
             )
+        except httpx.HTTPStatusError as e:
+            # Only a definitive 404 is worth negative-caching; transient
+            # failures (timeouts, 5xx, circuit breaker) must stay retryable.
+            if e.response.status_code == 404:
+                self._cache[cache_key] = None
+            return None
         except httpx.HTTPError:
-            self._cache[cache_key] = None
             return None
 
         result = _parse_work(resp.json().get("message", {}))

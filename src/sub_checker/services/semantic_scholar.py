@@ -64,7 +64,7 @@ class SemanticScholarClient(RateLimitedClient):
         except httpx.HTTPError:
             return []
 
-        results = [_parse_paper(p) for p in resp.json().get("data", [])]
+        results = [_parse_paper(p) for p in (resp.json().get("data") or [])]
         self._cache[cache_key] = results
         return results
 

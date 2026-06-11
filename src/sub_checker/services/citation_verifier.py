@@ -60,15 +60,22 @@ def _extract_first_author(ref_text: str) -> str:
 
 
 def _extract_year(ref_text: str) -> str:
-    """Extract publication year from reference text."""
-    years = re.findall(r"\b(?:19|20)\d{2}\b", ref_text)
-    return years[-1] if years else ""
+    """Extract publication year from reference text.
+
+    Page ranges like "2013-2019" fall in the year regex's range, so strip
+    number ranges first, then take the FIRST remaining year — in Vancouver
+    and Springer styles the publication year precedes page numbers.
+    """
+    text = re.sub(r"\b\d+\s*[-\u2013]\s*\d+\b", "", ref_text)  # hyphen or en dash
+    years = re.findall(r"\b(?:19|20)\d{2}\b", text)
+    return years[0] if years else ""
 
 
 def _extract_doi(ref_text: str) -> str:
-    """Extract DOI from reference text."""
-    m = re.search(r"(?:doi[:\s]*|https?://doi\.org/)(10\.\S+?)\.?\s*$", ref_text, re.I)
-    return m.group(1).rstrip(".") if m else ""
+    """Extract DOI from reference text (not anchored — DOIs may be followed
+    by text like "Accessed 2024" or "[Epub ahead of print]")."""
+    m = re.search(r"(?:doi[:\s]*|https?://doi\.org/)(10\.\S+)", ref_text, re.I)
+    return m.group(1).rstrip(".,;") if m else ""
 
 
 def _extract_title_keywords(ref_text: str) -> str:
@@ -146,6 +153,7 @@ def _cross_validate(
     best_match: dict[str, Any] = {}
     best_score = 0.0
     title_kw = ref_parsed["title_keywords"]
+    ref_doi = ref_parsed.get("doi", "").lower()
 
     sources: list[tuple[str, str, list[dict[str, Any]]]] = [
         ("pubmed", "pmid", pubmed_results),
@@ -153,24 +161,43 @@ def _cross_validate(
         ("crossref", "doi", crossref_results),
     ]
 
+    # A DOI lookup that returns the exact DOI is definitive — it must not
+    # depend on title-keyword similarity (which can be empty/unparseable).
+    doi_confirmed = False
+    if ref_doi:
+        for source_name, id_key, source_results in sources:
+            for r in source_results:
+                if (r.get("doi") or "").lower() == ref_doi:
+                    doi_confirmed = True
+                    if source_name not in sources_found:
+                        sources_found.append(source_name)
+                    if not best_match:
+                        best_match = {
+                            "source": source_name,
+                            id_key: r.get(id_key),
+                            "title": r.get("title", ""),
+                        }
+                    break
+
     for source_name, id_key, source_results in sources:
         for r in source_results:
             title = r.get("title", "")
-            sim = _title_similarity(title_kw, title) if title_kw else 0.3
+            sim = _title_similarity(title_kw, title) if title_kw else 0.0
             if sim > best_score:
                 best_score = sim
                 best_match = {"source": source_name, id_key: r.get(id_key), "title": title}
-            if sim > 0.4:
+            if sim > 0.55 and source_name not in sources_found:
                 sources_found.append(source_name)
                 break
 
-    # Determine confidence and status
+    # Determine confidence and status. Multi-source counts scale with the
+    # best title similarity so three weak 0.56 matches can't reach 0.95.
     n_sources = len(sources_found)
     if n_sources >= 3:
-        confidence = 0.95
+        confidence = 0.75 + best_score * 0.2
         status = "verified"
     elif n_sources == 2:
-        confidence = 0.85
+        confidence = 0.65 + best_score * 0.2
         status = "verified"
     elif n_sources == 1:
         confidence = 0.6 + best_score * 0.2
@@ -178,6 +205,15 @@ def _cross_validate(
     else:
         confidence = best_score * 0.4
         status = "uncertain" if best_score > 0.3 else "not_found"
+        # No title keywords to compare against, but the queries did return
+        # candidates — we can't verify, but "not found" would be wrong too.
+        if not title_kw and any(res for _, _, res in sources):
+            confidence = 0.3
+            status = "uncertain"
+
+    if doi_confirmed:
+        confidence = max(confidence, 0.9)
+        status = "verified"
 
     details_parts = []
     if sources_found:
@@ -233,7 +269,9 @@ async def _verify_single(
     return verified
 
 
-_BATCH_SIZE = 3  # Process references in batches to avoid overwhelming APIs
+_MAX_IN_FLIGHT = 8  # references verified concurrently; per-client rate
+# limiters and semaphores do the real throttling, so a batch barrier would
+# only let the slowest source (S2 at 1 req/s) idle the fast ones.
 
 
 async def verify_references(
@@ -242,23 +280,18 @@ async def verify_references(
     s2: SemanticScholarClient,
     crossref: CrossrefClient,
 ) -> list[VerifiedReference]:
-    """Verify all references against PubMed, Semantic Scholar, and Crossref.
+    """Verify all references against PubMed, Semantic Scholar, and Crossref."""
+    in_flight = asyncio.Semaphore(_MAX_IN_FLIGHT)
 
-    Processes in batches of 3 to respect API rate limits while maintaining
-    parallelism within each batch.
-    """
-    results: list[VerifiedReference] = []
+    async def bounded(ref_num: int, ref_text: str) -> VerifiedReference:
+        async with in_flight:
+            return await _verify_single(ref_num, ref_text, pubmed, s2, crossref)
 
-    for batch_start in range(0, len(reference_lines), _BATCH_SIZE):
-        batch = reference_lines[batch_start : batch_start + _BATCH_SIZE]
-        tasks = [
-            _verify_single(batch_start + j + 1, ref_text, pubmed, s2, crossref)
-            for j, ref_text in enumerate(batch)
-        ]
-        batch_results = await asyncio.gather(*tasks)
-        results.extend(batch_results)
-
-    return results
+    return list(
+        await asyncio.gather(
+            *(bounded(i + 1, ref_text) for i, ref_text in enumerate(reference_lines))
+        )
+    )
 
 
 def format_verification_report(results: list[VerifiedReference]) -> str:
@@ -273,10 +306,12 @@ def format_verification_report(results: list[VerifiedReference]) -> str:
     likely_count = sum(1 for r in results if r.status == "likely_valid")
     uncertain_count = sum(1 for r in results if r.status == "uncertain")
     not_found_count = sum(1 for r in results if r.status == "not_found")
+    unparseable_count = sum(1 for r in results if r.status == "unparseable")
 
     lines.append(
         f"Summary: {verified_count} verified | {likely_count} likely valid | "
-        f"{uncertain_count} uncertain | {not_found_count} not found"
+        f"{uncertain_count} uncertain | {not_found_count} not found | "
+        f"{unparseable_count} unparseable"
     )
     lines.append("")
 
