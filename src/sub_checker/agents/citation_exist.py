@@ -43,8 +43,9 @@ class CitationExistAgent(BaseCheckerAgent):
         """Override to inject deterministic pre-scan results."""
         base_msg = super()._build_initial_message(manuscript, config)
 
-        # Deterministic pre-pass
-        cited_nums = extract_citation_numbers(manuscript.raw_text)
+        # Deterministic pre-pass — scan body only, or volume(issue) patterns in
+        # the reference list (e.g. "2022;101(27)") show up as phantom citations
+        cited_nums = extract_citation_numbers(manuscript.body_text or manuscript.raw_text)
         ref_count = count_references(manuscript.reference_section)
         ref_nums = set(range(1, ref_count + 1)) if ref_count > 0 else set()
 
@@ -60,7 +61,12 @@ class CitationExistAgent(BaseCheckerAgent):
 
         if cited_not_in_refs:
             pre_scan.append(
-                f"POTENTIAL ISSUE: Citation numbers NOT in reference list: {cited_not_in_refs}"
+                f"NEEDS VERIFICATION: numbers found in (...)/[...] but NOT in the "
+                f"reference list: {cited_not_in_refs}. These may be real dangling "
+                f"citations OR plain data values in parentheses (e.g. '(50)' as a "
+                f"measurement, sample size, or percentile). Use search_text on each "
+                f"number to see its surrounding context and report ONLY the ones "
+                f"that are actually used as citations."
             )
         if refs_not_cited:
             pre_scan.append(

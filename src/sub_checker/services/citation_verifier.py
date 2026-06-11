@@ -46,10 +46,17 @@ def _title_similarity(a: str, b: str) -> float:
 
 
 def _extract_first_author(ref_text: str) -> str:
-    """Extract first author surname from reference text."""
-    # Match patterns like "Smith AB," or "Smith A, " or "Smith-Jones AB,"
-    m = re.match(r"^(\d+\.\s*)?([A-Z][a-z'-]+)", ref_text.strip())
-    return m.group(2) if m else ""
+    """Extract first author surname from reference text.
+
+    Handles "Smith AB,", "Smith-Jones AB,", and lowercase particles like
+    "van Gijn W," or "de la Portilla F,".
+    """
+    text = re.sub(r"^\d+\.\s*", "", ref_text.strip())  # strip "12. " numbering
+    m = re.match(
+        r"^((?:(?:van|von|de|del|der|den|da|di|la|le)\s+){0,2}[A-Z][a-zA-Z'-]+)",
+        text,
+    )
+    return m.group(1) if m else ""
 
 
 def _extract_year(ref_text: str) -> str:
@@ -66,8 +73,16 @@ def _extract_doi(ref_text: str) -> str:
 
 def _extract_title_keywords(ref_text: str) -> str:
     """Extract likely title from reference (between author and journal)."""
-    # Remove author part (before first period after names)
-    parts = ref_text.split(".", 2)
+    text = re.sub(r"^\d+\.\s*", "", ref_text.strip())  # strip "12. " numbering
+
+    # Springer/(YYYY) style: "Heald RJ, Husband EM (1982) The mesorectum..." —
+    # the title is the text after the year parenthesis, up to the next period.
+    m = re.search(r"\((?:19|20)\d{2}\)\s*(.+)", text)
+    if m:
+        return m.group(1).split(".")[0].strip()[:80]
+
+    # Vancouver style: "Heald RJ, Husband EM. The mesorectum... Br J Surg. 1982"
+    parts = text.split(".", 2)
     if len(parts) >= 2:
         candidate = parts[1].strip()
         # Remove trailing journal/year info

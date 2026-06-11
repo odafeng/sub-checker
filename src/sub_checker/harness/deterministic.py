@@ -133,7 +133,7 @@ def validate_citation_numbers(
     Catches false positives like "reference [23] not cited" when regex
     confirms it IS cited.
     """
-    cited = extract_citation_numbers(manuscript.raw_text)
+    cited = extract_citation_numbers(manuscript.body_text or manuscript.raw_text)
     ref_count = count_references(manuscript.reference_section)
     actions: list[tuple[int, str, str]] = []
 

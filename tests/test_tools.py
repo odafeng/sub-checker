@@ -83,3 +83,8 @@ def test_extract_citation_numbers_ignores_years():
 def test_extract_citation_numbers_ignores_large_page_ranges():
     text = "See pages (1023-1045) for details; the claim itself is from [12]."
     assert extract_citation_numbers(text) == {12}
+
+
+def test_extract_citation_numbers_ignores_zero():
+    text = "No events occurred (0) in the control group [3]."
+    assert extract_citation_numbers(text) == {3}

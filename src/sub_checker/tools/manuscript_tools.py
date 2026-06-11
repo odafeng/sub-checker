@@ -28,11 +28,11 @@ def extract_citation_numbers(raw_text: str) -> set[int]:
                 rng = re.split(r"[\u2013-]", part)
                 if len(rng) == 2 and rng[0].strip().isdigit() and rng[1].strip().isdigit():
                     lo, hi = int(rng[0].strip()), int(rng[1].strip())
-                    if lo <= hi <= _MAX_CITATION_NUMBER:
+                    if 1 <= lo <= hi <= _MAX_CITATION_NUMBER:
                         cited.update(range(lo, hi + 1))
             elif part.isdigit():
                 n = int(part)
-                if n <= _MAX_CITATION_NUMBER:
+                if 1 <= n <= _MAX_CITATION_NUMBER:  # citations are 1-based; (0) is data
                     cited.add(n)
     return cited
 

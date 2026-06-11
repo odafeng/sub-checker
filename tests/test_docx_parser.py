@@ -39,6 +39,45 @@ def test_parse_docx_title(sample_docx: Path, sample_figures_dir: Path):
     assert "Treatment X" in ms.title
 
 
+def test_parse_docx_long_heading_styled_paragraph_kept_as_content(tmp_path: Path):
+    """A full prose paragraph mis-styled as Heading must stay in raw_text.
+
+    Seen in real manuscripts: entire abstracts styled as headings, which made
+    them invisible to every checker.
+    """
+    from docx import Document
+
+    doc = Document()
+    doc.add_heading("Abstract", level=2)
+    long_text = (
+        "The transition from laparoscopic to robotic surgery raises safety "
+        "concerns during the learning curve, particularly when complex cases "
+        "are preferentially selected for the robotic platform across centers."
+    )
+    doc.add_heading(long_text, level=3)  # mis-styled content
+    path = tmp_path / "ms.docx"
+    doc.save(str(path))
+
+    ms = parse_docx(path, None)
+    assert long_text in ms.raw_text
+    assert all(len(s.heading.split()) <= 25 for s in ms.sections)
+
+
+def test_parse_docx_title_skips_metadata_lines(tmp_path: Path):
+    from docx import Document
+
+    doc = Document()
+    doc.add_paragraph("Article Type: Observational Study")
+    doc.add_paragraph("Running head: NMF Decomposition")
+    doc.add_heading("Quantifying the Relative Contributions of Case Complexity", level=1)
+    doc.add_paragraph("Body text.")
+    path = tmp_path / "ms.docx"
+    doc.save(str(path))
+
+    ms = parse_docx(path, None)
+    assert ms.title == "Quantifying the Relative Contributions of Case Complexity"
+
+
 def test_parse_docx_references_end_at_next_heading(tmp_path: Path):
     """Sections after References (e.g. Figure Legends) must not leak into it."""
     from docx import Document
@@ -57,3 +96,25 @@ def test_parse_docx_references_end_at_next_heading(tmp_path: Path):
     assert ms.reference_section is not None
     assert "Smith" in ms.reference_section
     assert "Mechanism of action" not in ms.reference_section
+
+
+def test_parse_docx_body_text_excludes_reference_list(tmp_path: Path):
+    """Citation scans use body_text — journal volume(issue) patterns in the
+    reference list (e.g. '2022;101(27)') must not appear as phantom citations."""
+    from docx import Document
+
+    doc = Document()
+    doc.add_heading("Introduction", level=2)
+    doc.add_paragraph("A claim [1].")
+    doc.add_heading("References", level=2)
+    doc.add_paragraph("Smith J. A study. Medicine. 2022;101(27):e29325.")
+    path = tmp_path / "ms.docx"
+    doc.save(str(path))
+
+    ms = parse_docx(path, None)
+    assert "A claim [1]." in ms.body_text
+    assert "101(27)" not in ms.body_text
+
+    from sub_checker.tools.manuscript_tools import extract_citation_numbers
+
+    assert extract_citation_numbers(ms.body_text) == {1}
