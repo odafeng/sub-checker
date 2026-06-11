@@ -21,6 +21,18 @@ Pre-submission manuscript checker powered by Claude agents with a Plan-Execute-V
 | **logic** | Contradictions, unsupported claims, methods-results mismatches |
 | **citation_claim** | Multi-source verification (PubMed + Semantic Scholar + Crossref), then verifies claims against abstracts |
 
+## Demo
+
+🎥 **[Watch the 60-second demo](docs/media/demo.mp4)** &nbsp;·&nbsp; [vertical version for mobile](docs/media/demo-vertical.mp4)
+
+### How it works
+
+![Architecture](docs/media/architecture.png)
+
+### How a reference is verified
+
+![Reference verification](docs/media/reference-verification.png)
+
 ## Install
 
 ```bash

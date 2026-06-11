@@ -21,6 +21,18 @@
 | **logic** | 矛盾、缺乏支持的主張、方法與結果不一致 |
 | **citation_claim** | 三源驗證（PubMed + Semantic Scholar + Crossref），再比對引用論文摘要與文中主張 |
 
+## Demo
+
+🎥 **[看 60 秒 demo](docs/media/demo.mp4)** &nbsp;·&nbsp; [直式手機版](docs/media/demo-vertical.mp4)
+
+### 整體架構
+
+![架構圖](docs/media/architecture.png)
+
+### 怎麼驗證一篇 reference
+
+![Reference 驗證](docs/media/reference-verification.png)
+
 ## 安裝
 
 ```bash
