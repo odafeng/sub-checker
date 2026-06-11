@@ -70,12 +70,18 @@ sub-check paper.docx --dry-run
 
 ### Web GUI
 
+The GUI needs the source repo (the React frontend is **not** shipped on PyPI), plus the optional web backend dependencies:
+
 ```bash
+git clone https://github.com/odafeng/sub-checker.git
+cd sub-checker
+pip install -e ".[web]"          # backend: FastAPI + uvicorn
+
 # Start backend
 uvicorn sub_checker.api:app --reload
 
 # Start frontend (in another terminal)
-cd frontend && npm run dev
+cd frontend && npm install && npm run dev
 ```
 
 Open `http://localhost:5173` — upload a `.docx`, pick a journal, run, and view the report with confidence badges and filtered false positives.
@@ -86,10 +92,11 @@ Open `http://localhost:5173` — upload a `.docx`, pick a journal, run, and view
 sub-check [OPTIONS] MANUSCRIPT_PATH
 
 Arguments:
-  MANUSCRIPT_PATH    Path to .docx file or directory containing one
+  MANUSCRIPT_PATH    Path to .docx file or directory containing one (optional with --init)
 
 Options:
   -j, --journal      Target journal name (e.g. "The Lancet")
+  -c, --config       Path to a config file (default: ./.sub-checker.yaml if present)
   -o, --output       terminal | json | markdown | html (default: terminal)
   --output-file      Write report to file
   --lang             Report language: en (default) or zh-TW
@@ -100,16 +107,17 @@ Options:
   --init             Generate default .sub-checker.yaml
 ```
 
-## Pipeline (5 phases)
+## Pipeline (Plan-Execute-Verify)
 
 ```
-Phase 1-3  │  7 checker agents (parallel within each phase)
-Phase 4    │  Deterministic post-validation (date math, citation cross-check)
-Phase 5    │  Reviewer agent validates all findings → confidence scores
+Checkers   │  7 agents run concurrently (global concurrency cap, default 3 at a time)
+Validate   │  Deterministic post-validation (date math, citation cross-check)
+Review     │  Reviewer agent scores every surviving finding → confidence
+Dedup      │  Same issue from multiple checkers collapsed to the highest-confidence one
 ```
 
 - **Pre-execution**: deterministic citation pre-scan + multi-source reference verification
-- **Post-validation**: false positives filtered, remaining findings get confidence scores (0-100%)
+- **Post-validation**: false positives filtered, remaining findings get confidence scores (0-100%), cross-checker duplicates merged
 - See [harness-architecture.md](docs/harness-architecture.md) for full technical details
 
 ## HTML report features
@@ -123,15 +131,20 @@ Phase 5    │  Reviewer agent validates all findings → confidence scores
 
 ## Cost estimate
 
-Uses Claude Opus 4.8 by default. Approximate cost per manuscript (~4000 words):
+By default judgment-heavy checkers (logic, citation_claim, journal_guidelines) and the
+reviewer run on **Claude Opus 4.8**, while mechanical checkers (typo, figure, citation_exist,
+citation_format) run on the cheaper **Claude Sonnet 4.6**. Per-checker `effort` is tuned to
+keep token use low. Measured on a real ~5,000-word, 25-reference manuscript:
 
 | Scope | Agents | Time | Cost |
 |-------|--------|------|------|
-| Quick check | `--only figure,citation` | ~4 min | ~$3 |
-| Standard | `--skip claim` | ~8 min | ~$7 |
-| Full check | all 7 agents + harness | ~12 min | ~$12–16 |
+| Quick check | `--only figure,citation` | ~3 min | ~$1 |
+| Standard | `--skip claim` | ~6 min | ~$2–3 |
+| Full check | all 7 agents + harness | ~10–12 min | ~$3–5 |
 
-You can change the model in `.sub-checker.yaml` (e.g. use `claude-sonnet-4-6` for cheaper runs).
+Cost scales with manuscript length and reference count (citation_claim verifies each
+reference against PubMed/Semantic Scholar/Crossref). Override any model in
+`.sub-checker.yaml` (e.g. set everything to `claude-sonnet-4-6` for cheaper runs).
 
 ## Logging
 
@@ -145,7 +158,7 @@ Set `cot_dir: "disabled"` in `.sub-checker.yaml` to turn off COT file logging (e
 
 ## Architecture
 
-- **5-phase pipeline**: Plan-Execute-Verify harness ([ADR-0010](docs/adr/0010-plan-execute-verify-harness.md))
+- **Plan-Execute-Verify harness**: concurrent checkers → deterministic validation → reviewer → dedup ([ADR-0010](docs/adr/0010-plan-execute-verify-harness.md))
 - 7 agents + reviewer agent, each with system prompt + curated tools + agentic loop ([ADR-0002](docs/adr/0002-agent-per-checker-architecture.md))
 - Parser provides raw data; agents judge document structure ([ADR-0009](docs/adr/0009-agent-over-deterministic-parsing.md))
 - Multi-source citation verification: PubMed + Semantic Scholar + Crossref ([ADR-0005](docs/adr/0005-semantic-scholar-fallback.md))

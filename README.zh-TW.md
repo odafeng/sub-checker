@@ -70,12 +70,18 @@ sub-check paper.docx --dry-run
 
 ### Web GUI
 
+GUI 需要原始 repo（React 前端**不會**隨 PyPI 套件發佈），外加 optional 的 web 後端相依套件：
+
 ```bash
+git clone https://github.com/odafeng/sub-checker.git
+cd sub-checker
+pip install -e ".[web]"          # 後端：FastAPI + uvicorn
+
 # 啟動後端
 uvicorn sub_checker.api:app --reload
 
 # 啟動前端（另開 terminal）
-cd frontend && npm run dev
+cd frontend && npm install && npm run dev
 ```
 
 開啟 `http://localhost:5173` — 上傳 `.docx`、選期刊、跑檢查、看報告（含 confidence badges 和 false positive 過濾）。
@@ -86,10 +92,11 @@ cd frontend && npm run dev
 sub-check [OPTIONS] MANUSCRIPT_PATH
 
 引數：
-  MANUSCRIPT_PATH    .docx 檔案路徑或包含 .docx 的目錄
+  MANUSCRIPT_PATH    .docx 檔案路徑或包含 .docx 的目錄（加 --init 時可省略）
 
 選項：
   -j, --journal      目標期刊名稱（如 "The Lancet"）
+  -c, --config       設定檔路徑（預設：若存在則用 ./.sub-checker.yaml）
   -o, --output       terminal | json | markdown | html（預設：terminal）
   --output-file      將報告寫入檔案
   --lang             報告語言：en（預設）或 zh-TW
@@ -100,16 +107,17 @@ sub-check [OPTIONS] MANUSCRIPT_PATH
   --init             產生預設 .sub-checker.yaml
 ```
 
-## Pipeline（5 階段）
+## Pipeline（Plan-Execute-Verify）
 
 ```
-Phase 1-3  │  7 個 checker agents（phase 內平行執行）
-Phase 4    │  Deterministic 後驗證（日期數學、引用交叉比對）
-Phase 5    │  Reviewer agent 驗證所有 findings → confidence scores
+Checkers   │  7 個 agents 並行執行（全域並發上限，預設一次 3 個）
+Validate   │  Deterministic 後驗證（日期數學、引用交叉比對）
+Review     │  Reviewer agent 為每個留下的 finding 評分 → confidence
+Dedup      │  多個 checker 報告的同一問題，合併為信心最高的那筆
 ```
 
 - **執行前**：deterministic 引用預掃 + 三源參考文獻驗證
-- **執行後**：false positives 被過濾，留下的 findings 標註 confidence score（0-100%）
+- **執行後**：false positives 被過濾，留下的 findings 標註 confidence score（0-100%），跨 checker 重複項合併
 - 詳見 [harness-architecture.md](docs/harness-architecture.md)
 
 ## HTML 報告功能
@@ -123,15 +131,19 @@ Phase 5    │  Reviewer agent 驗證所有 findings → confidence scores
 
 ## 費用估算
 
-預設使用 Claude Opus 4.8。約 4000 字文稿的近似費用：
+預設情況下，判斷型 checker（logic、citation_claim、journal_guidelines）與 reviewer 使用
+**Claude Opus 4.8**，機械型 checker（typo、figure、citation_exist、citation_format）則使用較便宜的
+**Claude Sonnet 4.6**；並針對每個 checker 調校 `effort` 以壓低 token 用量。以一篇真實的
+約 5,000 字、25 篇參考文獻的文稿實測：
 
 | 範圍 | Agents | 時間 | 費用 |
 |------|--------|------|------|
-| 快速檢查 | `--only figure,citation` | ~4 min | ~$3 |
-| 標準檢查 | `--skip claim` | ~8 min | ~$7 |
-| 完整檢查 | 全部 7 agents + harness | ~12 min | ~$12–16 |
+| 快速檢查 | `--only figure,citation` | ~3 min | ~$1 |
+| 標準檢查 | `--skip claim` | ~6 min | ~$2–3 |
+| 完整檢查 | 全部 7 agents + harness | ~10–12 min | ~$3–5 |
 
-可在 `.sub-checker.yaml` 中更改模型（如用 `claude-sonnet-4-6` 降低費用）。
+費用隨文稿長度與參考文獻數量增加（citation_claim 會對每篇參考文獻查 PubMed/Semantic
+Scholar/Crossref）。可在 `.sub-checker.yaml` 覆寫任一模型（如全部設為 `claude-sonnet-4-6` 以降低費用）。
 
 ## 日誌
 
@@ -145,7 +157,7 @@ Phase 5    │  Reviewer agent 驗證所有 findings → confidence scores
 
 ## 架構
 
-- **5 階段 pipeline**：Plan-Execute-Verify harness（[ADR-0010](docs/adr/0010-plan-execute-verify-harness.md)）
+- **Plan-Execute-Verify harness**：並行 checkers → deterministic 驗證 → reviewer → 去重（[ADR-0010](docs/adr/0010-plan-execute-verify-harness.md)）
 - 7 個 agents + reviewer agent，各有 system prompt + 策劃的 tools + agentic loop（[ADR-0002](docs/adr/0002-agent-per-checker-architecture.md)）
 - Parser 提供原始資料；agents 自行判斷文件結構（[ADR-0009](docs/adr/0009-agent-over-deterministic-parsing.md)）
 - 三源引用驗證：PubMed + Semantic Scholar + Crossref（[ADR-0005](docs/adr/0005-semantic-scholar-fallback.md)）
