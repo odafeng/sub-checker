@@ -1,0 +1,44 @@
+name: Publish to PyPI
+
+# Publishes on a version tag (e.g. v0.1.0) via PyPI Trusted Publishing (OIDC).
+# No API token or secret is stored — PyPI verifies the GitHub identity.
+# One-time setup on PyPI: https://pypi.org/manage/account/publishing/
+#   PyPI Project Name: sub-checker
+#   Owner: odafeng
+#   Repository name: sub-checker
+#   Workflow name: publish.yml
+#   Environment name: pypi
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Build sdist + wheel
+        run: |
+          python -m pip install --upgrade build twine
+          python -m build
+          python -m twine check dist/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write # required for Trusted Publishing
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
