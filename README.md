@@ -1,5 +1,10 @@
 # sub-checker
 
+[![PyPI version](https://img.shields.io/pypi/v/sub-checker.svg)](https://pypi.org/project/sub-checker/)
+[![Python versions](https://img.shields.io/pypi/pyversions/sub-checker.svg)](https://pypi.org/project/sub-checker/)
+[![CI](https://github.com/odafeng/sub-checker/actions/workflows/ci.yml/badge.svg)](https://github.com/odafeng/sub-checker/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/pypi/l/sub-checker.svg)](https://github.com/odafeng/sub-checker/blob/main/LICENSE)
+
 [繁體中文](README.zh-TW.md) | English
 
 Pre-submission manuscript checker powered by Claude agents with a Plan-Execute-Verify harness. Each check is performed by a specialized AI agent, then validated by deterministic checks and a reviewer agent to eliminate false positives.

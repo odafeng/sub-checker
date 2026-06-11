@@ -1,5 +1,10 @@
 # sub-checker
 
+[![PyPI version](https://img.shields.io/pypi/v/sub-checker.svg)](https://pypi.org/project/sub-checker/)
+[![Python versions](https://img.shields.io/pypi/pyversions/sub-checker.svg)](https://pypi.org/project/sub-checker/)
+[![CI](https://github.com/odafeng/sub-checker/actions/workflows/ci.yml/badge.svg)](https://github.com/odafeng/sub-checker/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/pypi/l/sub-checker.svg)](https://github.com/odafeng/sub-checker/blob/main/LICENSE)
+
 [English](README.md) | 繁體中文
 
 由 Claude agents 驅動的投稿前文稿檢查器，採用 Plan-Execute-Verify harness 架構。每項檢查由專門的 AI agent 執行，再經 deterministic 驗證和 reviewer agent 過濾 false positives。
