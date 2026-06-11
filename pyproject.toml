@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sub-checker"
-version = "0.1.0"
+version = "0.1.1"
 description = "Pre-submission manuscript checker powered by Claude agents"
 readme = "README.md"
 license = "MIT"
