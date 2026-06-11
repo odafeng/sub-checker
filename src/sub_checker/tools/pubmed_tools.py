@@ -31,9 +31,15 @@ async def search_literature(
             authors_str = ", ".join(r["authors"][:3])
             if len(r["authors"]) > 3:
                 authors_str += " et al."
-            pid = r["paperId"][:8]
-            doi_info = f" | DOI: {r['doi']}" if r.get("doi") else ""
-            lines.append(f"  S2:{pid} | {r['title'][:100]} | {authors_str}{doi_info}")
+            # Prefer DOI (resolvable everywhere); otherwise the FULL paperId —
+            # a truncated ID cannot be looked up via get_abstract.
+            if r.get("doi"):
+                ident = f"DOI:{r['doi']}"
+            elif r.get("pmid"):
+                ident = f"PMID {r['pmid']}"
+            else:
+                ident = r["paperId"]
+            lines.append(f"  {ident} | {r['title'][:100]} | {authors_str}")
         return "\n".join(lines)
 
     return (
@@ -47,14 +53,17 @@ async def get_abstract(
     s2: SemanticScholarClient,
     paper_id: str,
 ) -> str:
-    """Get abstract by PMID or Semantic Scholar paper ID."""
+    """Get abstract by PMID, DOI, or Semantic Scholar paper ID."""
+    # Tolerate a legacy "S2:" display prefix — the S2 API has no such scheme.
+    paper_id = paper_id.removeprefix("S2:").strip()
+
     # If it looks like a PMID (numeric), try PubMed first
     if paper_id.isdigit():
         abstract = await pubmed.get_abstract(paper_id)
         if abstract and len(abstract) > 50:
             return f"Abstract (PMID {paper_id}):\n{abstract}"
 
-    # Try Semantic Scholar (accepts S2 ID, DOI:xxx, PMID:xxx)
+    # Try Semantic Scholar (accepts full S2 ID, DOI:xxx, PMID:xxx)
     s2_id = paper_id
     if paper_id.isdigit():
         s2_id = f"PMID:{paper_id}"
@@ -106,8 +115,9 @@ TOOL_GET_ABSTRACT = {
     "description": (
         "Get the abstract of a paper by its ID. "
         "Accepts: PubMed ID (numeric, e.g. '12345678'), "
-        "Semantic Scholar ID (e.g. 'S2:abc12345'), "
-        "or DOI (e.g. 'DOI:10.1234/xxx')."
+        "DOI (e.g. 'DOI:10.1234/xxx'), "
+        "or a full Semantic Scholar paper ID exactly as returned by "
+        "search_literature. Pass the identifier verbatim — do not truncate it."
     ),
     "input_schema": {
         "type": "object",
@@ -120,6 +130,3 @@ TOOL_GET_ABSTRACT = {
         "required": ["paper_id"],
     },
 }
-
-# Keep old names for backward compat
-TOOL_SEARCH_PUBMED = TOOL_SEARCH_LITERATURE

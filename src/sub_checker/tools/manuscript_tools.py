@@ -114,8 +114,6 @@ def get_metadata(manuscript: Manuscript) -> str:
     section_list = [s.heading for s in manuscript.sections]
 
     # Count figures/tables mentioned
-    import re
-
     fig_refs = set(re.findall(r"(?:Figure|Fig\.?)\s*(\d+)", manuscript.raw_text, re.IGNORECASE))
     table_refs = set(re.findall(r"Table\s*(\d+)", manuscript.raw_text, re.IGNORECASE))
 

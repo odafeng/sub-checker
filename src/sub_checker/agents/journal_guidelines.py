@@ -26,7 +26,6 @@ class JournalGuidelinesAgent(BaseCheckerAgent):
 
     def __init__(self, model: str = "claude-opus-4-8"):
         super().__init__(model=model)
-        self._manuscript: Manuscript | None = None
         self._web_service: WebService | None = None
 
     def _default_system_prompt(self) -> str:
@@ -104,7 +103,6 @@ class JournalGuidelinesAgent(BaseCheckerAgent):
         return f"Unknown tool: {tool_name}"
 
     async def run(self, manuscript: Manuscript, config: Config):
-        self._manuscript = manuscript
         try:
             return await super().run(manuscript, config)
         finally:

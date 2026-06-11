@@ -33,7 +33,6 @@ class CitationClaimAgent(BaseCheckerAgent):
 
     def __init__(self, model: str = "claude-opus-4-8"):
         super().__init__(model=model)
-        self._manuscript: Manuscript | None = None
         self._pubmed: PubMedClient | None = None
         self._s2: SemanticScholarClient | None = None
         self._verification_report: str = ""
@@ -113,7 +112,6 @@ class CitationClaimAgent(BaseCheckerAgent):
         return f"Unknown tool: {tool_name}"
 
     async def run(self, manuscript: Manuscript, config: Config):
-        self._manuscript = manuscript
         self._pubmed = PubMedClient(
             email=config.claim.pubmed_email,
             api_key=config.claim.pubmed_api_key,

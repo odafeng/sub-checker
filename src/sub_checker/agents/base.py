@@ -30,6 +30,14 @@ logger = logging.getLogger("sub_checker.agents")
 MAX_ITERATIONS = 30
 
 
+def supports_adaptive_thinking(model: str) -> bool:
+    """Adaptive thinking is available on Opus 4.6+ / Sonnet 4.6 / Fable 5."""
+    return any(
+        marker in model
+        for marker in ("opus-4-6", "opus-4-7", "opus-4-8", "sonnet-4-6", "fable")
+    )
+
+
 def set_message_cache_breakpoint(messages: list[MessageParam]) -> None:
     """Mark the last content block of the last message with cache_control.
 
@@ -66,6 +74,7 @@ class BaseCheckerAgent(ABC):
         self.model = model
         self._findings: list[Finding] = []
         self._token_usage = TokenUsage()
+        self._manuscript: Manuscript | None = None
 
     @cached_property
     def system_prompt(self) -> str:
@@ -101,9 +110,9 @@ class BaseCheckerAgent(ABC):
         else:
             parts.append(
                 "Target journal: NOT SPECIFIED. "
-                "Do NOT assume a specific journal or citation format. "
-                "Only check internal consistency (e.g., are all citations in the same style? "
-                "are all references formatted the same way?)."
+                "Do NOT assume any journal-specific requirements (formatting, "
+                "citation style, word limits). Only check internal consistency "
+                "within the manuscript itself."
             )
         parts.append(
             f"The manuscript has {len(manuscript.sections)} sections "
@@ -150,8 +159,27 @@ class BaseCheckerAgent(ABC):
         self._findings.append(finding)
         return f"Finding recorded: [{severity.value}] {finding.message}"
 
+    def _note_incomplete(self, message: str) -> None:
+        """Record that this check is incomplete.
+
+        validation_status="confirmed" keeps the note out of the harness/
+        reviewer (which could otherwise filter it as "not a manuscript
+        issue"), so the user always sees that coverage was partial.
+        """
+        self._findings.append(
+            Finding(
+                checker=self.name,
+                severity=Severity.INFO,
+                message=message,
+                claim_type="other",
+                validation_status="confirmed",
+                validation_note="[harness] incomplete-run notice, not reviewed",
+            )
+        )
+
     async def run(self, manuscript: Manuscript, config: Config) -> CheckerResult:
         """Execute the agent loop with full logging."""
+        self._manuscript = manuscript
         self._findings = []
         self._token_usage = TokenUsage()
         start = time.monotonic()
@@ -170,7 +198,6 @@ class BaseCheckerAgent(ABC):
         )
         logger.info("Starting agent '%s' (run_id=%s)", self.name, run_id)
 
-        client = anthropic.AsyncAnthropic()
         # Deep-copy: tool definitions are shared module constants and we add
         # a cache_control marker to the last one (caches system + tools prefix).
         tools = cast(list[ToolParam], copy.deepcopy(self.get_tools()))
@@ -200,82 +227,128 @@ class BaseCheckerAgent(ABC):
 
         iteration = 0
         try:
-            while True:
-                iteration += 1
-                if iteration > MAX_ITERATIONS:
-                    logger.warning(
-                        "[%s] Hit max iterations (%d), stopping agent loop",
-                        self.name,
-                        MAX_ITERATIONS,
-                    )
-                    break
-                logger.debug("[%s] Iteration %d: sending API request", self.name, iteration)
-                cot.log_request(messages, tools)
-                set_message_cache_breakpoint(messages)
-
-                response = await client.messages.create(
-                    model=self.model,
-                    max_tokens=4096,
-                    system=system_blocks,  # type: ignore[arg-type]
-                    tools=tools,
-                    messages=messages,
-                )
-
-                self._token_usage.input_tokens += response.usage.input_tokens
-                self._token_usage.output_tokens += response.usage.output_tokens
-                self._token_usage.cache_creation_input_tokens += (
-                    response.usage.cache_creation_input_tokens or 0
-                )
-                self._token_usage.cache_read_input_tokens += (
-                    response.usage.cache_read_input_tokens or 0
-                )
-                cot.log_response(str(response.stop_reason), response.content)
-
-                if response.stop_reason == "end_turn":
-                    logger.debug("[%s] Agent finished (end_turn)", self.name)
-                    break
-
-                # Process tool calls
-                tool_results = []
-                for block in response.content:
-                    if block.type == "tool_use":
-                        logger.debug("[%s] Tool call: %s(%s)", self.name, block.name, block.input)
-
-                        if block.name == "add_finding":
-                            result = self._handle_add_finding(block.input)
-                            inp = block.input
-                            cot.log_finding(
-                                str(inp.get("severity", "warning")),
-                                str(inp.get("message", "")),
-                            )
-                        else:
-                            try:
-                                result = await self.handle_tool_call(block.name, block.input)
-                            except Exception as e:
-                                result = f"Tool error: {e}"
-                                logger.error(
-                                    "[%s] Tool '%s' failed: %s",
-                                    self.name,
-                                    block.name,
-                                    e,
-                                    exc_info=True,
-                                )
-                                cot.log_error(f"Tool '{block.name}' failed: {e}", e)
-
-                        cot.log_tool_result(block.name, block.id, result)
-                        tool_results.append(
-                            {"type": "tool_result", "tool_use_id": block.id, "content": result}
+            async with anthropic.AsyncAnthropic() as client:
+                while True:
+                    iteration += 1
+                    if iteration > MAX_ITERATIONS:
+                        logger.warning(
+                            "[%s] Hit max iterations (%d), stopping agent loop",
+                            self.name,
+                            MAX_ITERATIONS,
                         )
+                        self._note_incomplete(
+                            f"Check stopped after reaching the {MAX_ITERATIONS}-iteration "
+                            "safety cap — some items may not have been checked."
+                        )
+                        break
+                    logger.debug("[%s] Iteration %d: sending API request", self.name, iteration)
+                    cot.log_request(messages, tools)
+                    set_message_cache_breakpoint(messages)
 
-                if not tool_results:
-                    logger.debug("[%s] No tool results, ending loop", self.name)
-                    break
+                    extra: dict[str, Any] = {}
+                    if supports_adaptive_thinking(self.model):
+                        # Judgment-heavy checking benefits from letting the
+                        # model decide when/how much to think.
+                        extra["thinking"] = {"type": "adaptive"}
+                    response = await client.messages.create(
+                        model=self.model,
+                        max_tokens=16000,
+                        system=system_blocks,  # type: ignore[arg-type]
+                        tools=tools,
+                        messages=messages,
+                        **extra,
+                    )
 
-                messages.append(
-                    cast(MessageParam, {"role": "assistant", "content": response.content})
-                )
-                messages.append(cast(MessageParam, {"role": "user", "content": tool_results}))
+                    self._token_usage.input_tokens += response.usage.input_tokens
+                    self._token_usage.output_tokens += response.usage.output_tokens
+                    self._token_usage.cache_creation_input_tokens += (
+                        response.usage.cache_creation_input_tokens or 0
+                    )
+                    self._token_usage.cache_read_input_tokens += (
+                        response.usage.cache_read_input_tokens or 0
+                    )
+                    cot.log_response(str(response.stop_reason), response.content)
 
+                    if response.stop_reason == "end_turn":
+                        logger.debug("[%s] Agent finished (end_turn)", self.name)
+                        break
+
+                    truncated = response.stop_reason == "max_tokens"
+                    content_blocks = list(response.content)
+                    if truncated:
+                        logger.warning(
+                            "[%s] Response truncated at max_tokens on iteration %d",
+                            self.name,
+                            iteration,
+                        )
+                        # A trailing tool_use may carry incomplete input —
+                        # never execute a half-formed call (e.g. a cut-off
+                        # add_finding would record a garbage finding).
+                        if content_blocks:
+                            last = content_blocks[-1]
+                            if last.type == "tool_use":
+                                content_blocks.pop()
+                                logger.warning(
+                                    "[%s] Dropped truncated tool_use '%s'", self.name, last.name
+                                )
+
+                    # Process tool calls
+                    tool_results = []
+                    for block in content_blocks:
+                        if block.type == "tool_use":
+                            logger.debug(
+                                "[%s] Tool call: %s(%s)", self.name, block.name, block.input
+                            )
+
+                            if block.name == "add_finding":
+                                result = self._handle_add_finding(block.input)
+                                inp = block.input
+                                cot.log_finding(
+                                    str(inp.get("severity", "warning")),
+                                    str(inp.get("message", "")),
+                                )
+                            else:
+                                try:
+                                    result = await self.handle_tool_call(block.name, block.input)
+                                except Exception as e:
+                                    result = f"Tool error: {e}"
+                                    logger.error(
+                                        "[%s] Tool '%s' failed: %s",
+                                        self.name,
+                                        block.name,
+                                        e,
+                                        exc_info=True,
+                                    )
+                                    cot.log_error(f"Tool '{block.name}' failed: {e}", e)
+
+                            cot.log_tool_result(block.name, block.id, result)
+                            tool_results.append(
+                                {"type": "tool_result", "tool_use_id": block.id, "content": result}
+                            )
+
+                    if not tool_results:
+                        if truncated:
+                            self._note_incomplete(
+                                "Check may be incomplete: the model response was "
+                                "truncated at the token limit before any tool call."
+                            )
+                        logger.debug("[%s] No tool results, ending loop", self.name)
+                        break
+
+                    messages.append(
+                        cast(MessageParam, {"role": "assistant", "content": content_blocks})
+                    )
+                    messages.append(cast(MessageParam, {"role": "user", "content": tool_results}))
+
+        except anthropic.APIError as e:
+            # Keep findings already collected (paid for) instead of discarding
+            # the whole run; flag the result as incomplete.
+            logger.error("[%s] API error, returning partial result: %s", self.name, e)
+            cot.log_error(f"API error (partial result): {e}", e)
+            self._note_incomplete(
+                f"Check incomplete: the API failed after {iteration} iterations ({e}). "
+                f"{len(self._findings)} finding(s) collected before the failure are kept."
+            )
         except Exception as e:
             logger.error("[%s] Agent failed: %s", self.name, e, exc_info=True)
             cot.log_error(f"Agent failed: {e}", e)

@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 from sub_checker.agents.base import ADD_FINDING_TOOL, BaseCheckerAgent
-from sub_checker.config import Config
-from sub_checker.models import Manuscript
 from sub_checker.tools.filesystem_tools import (
     TOOL_CHECK_FILE_EXISTS,
     TOOL_LIST_FIGURES,
@@ -19,10 +17,6 @@ from sub_checker.tools.manuscript_tools import (
 
 class FigureTableAgent(BaseCheckerAgent):
     name = "figure_table"
-
-    def __init__(self, model: str = "claude-opus-4-8"):
-        super().__init__(model=model)
-        self._manuscript: Manuscript | None = None
 
     def _default_system_prompt(self) -> str:
         return (
@@ -65,7 +59,3 @@ class FigureTableAgent(BaseCheckerAgent):
         if tool_name == "check_file_exists":
             return check_file_exists(ms, tool_input["filename"])
         return f"Unknown tool: {tool_name}"
-
-    async def run(self, manuscript: Manuscript, config: Config):
-        self._manuscript = manuscript
-        return await super().run(manuscript, config)

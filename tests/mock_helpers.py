@@ -62,5 +62,9 @@ def mock_anthropic_client(
     mock_create = AsyncMock(side_effect=list(responses))
     mock_client_instance = MagicMock()
     mock_client_instance.messages.create = mock_create
+    # Support `async with AsyncAnthropic() as client:` — __aenter__ must yield
+    # the configured instance, not a fresh MagicMock.
+    mock_client_instance.__aenter__ = AsyncMock(return_value=mock_client_instance)
+    mock_client_instance.__aexit__ = AsyncMock(return_value=False)
 
     return patch(target, return_value=mock_client_instance)

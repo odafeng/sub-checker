@@ -1,13 +1,9 @@
 from __future__ import annotations
 
 from sub_checker.agents.base import ADD_FINDING_TOOL, BaseCheckerAgent
-from sub_checker.config import Config
-from sub_checker.models import Manuscript
 from sub_checker.tools.manuscript_tools import (
-    TOOL_READ_PARAGRAPH,
     TOOL_READ_SECTION,
     TOOL_SEARCH_TEXT,
-    read_paragraph,
     read_section,
     search_text,
 )
@@ -15,10 +11,6 @@ from sub_checker.tools.manuscript_tools import (
 
 class TypoGrammarAgent(BaseCheckerAgent):
     name = "typo_grammar"
-
-    def __init__(self, model: str = "claude-opus-4-8"):
-        super().__init__(model=model)
-        self._manuscript: Manuscript | None = None
 
     def _default_system_prompt(self) -> str:
         return (
@@ -30,7 +22,7 @@ class TypoGrammarAgent(BaseCheckerAgent):
             "5. Be aware that scientific terms, gene names, chemical names, etc. are NOT typos\n\n"
             "WORKFLOW — follow this exactly:\n"
             "1. Use read_section to read sections one at a time (Abstract, Introduction, "
-            "Methods, Results, Discussion, etc.). Do NOT use read_paragraph.\n"
+            "Methods, Results, Discussion, etc.).\n"
             "2. After reading each section, immediately call add_finding for any issues found.\n"
             "3. After you have read ALL sections (excluding References), STOP. Do not re-read.\n"
             "4. If you find no issues in the entire manuscript, simply finish without findings.\n\n"
@@ -51,7 +43,6 @@ class TypoGrammarAgent(BaseCheckerAgent):
     def get_tools(self) -> list[dict]:
         return [
             TOOL_READ_SECTION,
-            TOOL_READ_PARAGRAPH,
             TOOL_SEARCH_TEXT,
             ADD_FINDING_TOOL,
         ]
@@ -61,12 +52,6 @@ class TypoGrammarAgent(BaseCheckerAgent):
         assert ms is not None
         if tool_name == "read_section":
             return read_section(ms, tool_input["section_name"])
-        if tool_name == "read_paragraph":
-            return read_paragraph(ms, tool_input["index"])
         if tool_name == "search_text":
             return search_text(ms, tool_input["query"])
         return f"Unknown tool: {tool_name}"
-
-    async def run(self, manuscript: Manuscript, config: Config):
-        self._manuscript = manuscript
-        return await super().run(manuscript, config)

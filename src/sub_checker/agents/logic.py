@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 from sub_checker.agents.base import ADD_FINDING_TOOL, BaseCheckerAgent
-from sub_checker.config import Config
-from sub_checker.models import Manuscript
 from sub_checker.tools.manuscript_tools import (
     TOOL_READ_PARAGRAPH,
     TOOL_READ_SECTION,
@@ -13,10 +11,6 @@ from sub_checker.tools.manuscript_tools import (
 
 class LogicAgent(BaseCheckerAgent):
     name = "logic"
-
-    def __init__(self, model: str = "claude-opus-4-8"):
-        super().__init__(model=model)
-        self._manuscript: Manuscript | None = None
 
     def _default_system_prompt(self) -> str:
         return (
@@ -49,7 +43,3 @@ class LogicAgent(BaseCheckerAgent):
         if tool_name == "read_paragraph":
             return read_paragraph(ms, tool_input["index"])
         return f"Unknown tool: {tool_name}"
-
-    async def run(self, manuscript: Manuscript, config: Config):
-        self._manuscript = manuscript
-        return await super().run(manuscript, config)

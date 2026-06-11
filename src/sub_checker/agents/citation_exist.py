@@ -18,10 +18,6 @@ from sub_checker.tools.manuscript_tools import (
 class CitationExistAgent(BaseCheckerAgent):
     name = "citation_exist"
 
-    def __init__(self, model: str = "claude-opus-4-8"):
-        super().__init__(model=model)
-        self._manuscript: Manuscript | None = None
-
     def _default_system_prompt(self) -> str:
         return (
             "You are a citation completeness reviewer. Your job is to:\n"
@@ -70,7 +66,12 @@ class CitationExistAgent(BaseCheckerAgent):
             )
         if refs_not_cited:
             pre_scan.append(
-                f"POTENTIAL ISSUE: Reference numbers NOT cited in text: {refs_not_cited}"
+                f"NEEDS VERIFICATION: reference numbers possibly NOT cited in text: "
+                f"{refs_not_cited}. CAUTION: the reference count above is a LINE-COUNT "
+                f"heuristic — references wrapped across multiple lines inflate it, "
+                f"which fabricates phantom 'uncited' numbers at the high end. Use "
+                f"get_reference_list to confirm the actual number of entries before "
+                f"reporting any of these as uncited."
             )
         if not cited_not_in_refs and not refs_not_cited and cited_nums and ref_nums:
             pre_scan.append("All numbered citations match reference list entries. No mismatches.")
@@ -96,7 +97,3 @@ class CitationExistAgent(BaseCheckerAgent):
         if tool_name == "search_text":
             return search_text(ms, tool_input["query"])
         return f"Unknown tool: {tool_name}"
-
-    async def run(self, manuscript: Manuscript, config: Config):
-        self._manuscript = manuscript
-        return await super().run(manuscript, config)
