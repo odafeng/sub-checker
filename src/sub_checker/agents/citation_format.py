@@ -54,7 +54,10 @@ class CitationFormatAgent(BaseCheckerAgent):
             "lists. Do NOT report missing numbering as an error.\n"
             "- Vancouver format allows ALL author initials (e.g. Filho PRS for 3 given names). "
             "Do NOT claim a maximum of 2 initials.\n\n"
-            "Use add_finding for each format violation."
+            "REPORTING RULES:\n"
+            "- ONLY report actual problems (errors, inconsistencies, violations).\n"
+            "- Do NOT report items that pass or are correct. No 'all good' findings.\n"
+            "- If everything is correct, simply finish without calling add_finding."
         )
 
     def get_tools(self) -> list[dict]:
