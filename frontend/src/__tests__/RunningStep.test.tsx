@@ -43,3 +43,24 @@ describe("RunningStep", () => {
     expect(screen.getByText("50%")).toBeInTheDocument();
   });
 });
+
+describe("RunningStep progress denominator", () => {
+  it("uses run_start total_agents plus harness phases when provided", () => {
+    const progress: AgentProgress[] = [
+      { type: "agent_start", agent: "typo_grammar" },
+      { type: "agent_done", agent: "typo_grammar", findings_count: 0, elapsed: 10 },
+    ];
+    // 1 done / (2 agents + 2 harness phases) = 25%
+    render(<RunningStep progress={progress} totalAgents={2} lang="en" />);
+    expect(screen.getByText("25%")).toBeInTheDocument();
+  });
+
+  it("never exceeds 100% with the fallback denominator", () => {
+    const progress: AgentProgress[] = [
+      { type: "agent_start", agent: "typo_grammar" },
+      { type: "agent_done", agent: "typo_grammar", findings_count: 0, elapsed: 10 },
+    ];
+    render(<RunningStep progress={progress} lang="en" />);
+    expect(screen.getByText("100%")).toBeInTheDocument();
+  });
+});

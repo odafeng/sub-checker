@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, it, expect } from "vitest";
 import ReportStep from "../components/ReportStep";
 import type { ReportData } from "../App";
@@ -105,5 +105,41 @@ describe("ReportStep", () => {
     render(<ReportStep report={mockReport} reportHtml="<p>test</p>" lang="zh-TW" />);
     expect(screen.getByText("卡片檢視")).toBeInTheDocument();
     expect(screen.getByText(/下載 HTML/)).toBeInTheDocument();
+  });
+});
+
+describe("ReportStep severity filter", () => {
+  it("filters findings to the clicked severity and toggles off", () => {
+    render(<ReportStep report={mockReport} reportHtml="<p>test</p>" lang="en" />);
+    const errorsCard = screen.getByRole("button", { name: /^3 errors$/i });
+
+    fireEvent.click(errorsCard);
+    expect(errorsCard).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText("Figure 3 missing")).toBeInTheDocument();
+    // warning finding and its now-empty checker section are hidden
+    expect(screen.queryByText("Inconsistent spacing")).not.toBeInTheDocument();
+    expect(screen.queryByText("Typo & Grammar")).not.toBeInTheDocument();
+
+    fireEvent.click(errorsCard);
+    expect(errorsCard).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByText("Inconsistent spacing")).toBeInTheDocument();
+  });
+});
+
+describe("ReportStep finding context", () => {
+  it("renders finding context when present", () => {
+    const withContext: ReportData = {
+      ...mockReport,
+      results: [
+        {
+          ...mockReport.results[0],
+          findings: [
+            { ...mockReport.results[0].findings[0], context: "the quick brown fox" },
+          ],
+        },
+      ],
+    };
+    render(<ReportStep report={withContext} reportHtml="<p>test</p>" lang="en" />);
+    expect(screen.getByText("the quick brown fox")).toBeInTheDocument();
   });
 });

@@ -46,31 +46,31 @@ export default function ConfigStep({ manuscript, onStart, lang }: Props) {
   return (
     <div className="space-y-6">
       {/* Manuscript info card */}
-      <div className="bg-[var(--surface)] border border-[var(--border)] rounded-2xl p-6">
+      <div className="bg-[var(--surface)] border border-[var(--border)] rounded-xl p-6">
         <h2 className="font-semibold text-lg mb-3">
           {zh ? "文稿資訊" : "Manuscript Info"}
         </h2>
         <div className="grid grid-cols-2 gap-3 text-sm">
           <div>
-            <span className="text-[#8b90a5]">
+            <span className="text-[var(--text-dim)]">
               {zh ? "檔案名稱" : "Filename"}:
             </span>{" "}
             {manuscript.filename}
           </div>
           <div>
-            <span className="text-[#8b90a5]">
+            <span className="text-[var(--text-dim)]">
               {zh ? "字數" : "Words"}:
             </span>{" "}
             {manuscript.word_count.toLocaleString()}
           </div>
           <div>
-            <span className="text-[#8b90a5]">
+            <span className="text-[var(--text-dim)]">
               {zh ? "段落數" : "Paragraphs"}:
             </span>{" "}
             {manuscript.paragraph_count}
           </div>
           <div>
-            <span className="text-[#8b90a5]">
+            <span className="text-[var(--text-dim)]">
               {zh ? "參考文獻" : "References"}:
             </span>{" "}
             {manuscript.has_references ? "✓" : "✗"}
@@ -79,7 +79,7 @@ export default function ConfigStep({ manuscript, onStart, lang }: Props) {
       </div>
 
       {/* Journal */}
-      <div className="bg-[var(--surface)] border border-[var(--border)] rounded-2xl p-6">
+      <div className="bg-[var(--surface)] border border-[var(--border)] rounded-xl p-6">
         <h2 className="font-semibold text-lg mb-3">
           {zh ? "目標期刊" : "Target Journal"}
         </h2>
@@ -93,12 +93,12 @@ export default function ConfigStep({ manuscript, onStart, lang }: Props) {
           value={journal}
           maxLength={200}
           onChange={(e) => setJournal(e.target.value)}
-          className="w-full bg-[var(--bg)] border border-[var(--border)] rounded-xl px-4 py-2.5 text-sm focus:border-[var(--accent)] outline-none"
+          className="w-full bg-[var(--bg)] border border-[var(--border)] rounded-xl px-4 py-2.5 text-sm focus:border-[var(--accent)] focus:ring-2 focus:ring-[var(--accent)]/20 outline-none"
         />
       </div>
 
       {/* Checker selection */}
-      <div className="bg-[var(--surface)] border border-[var(--border)] rounded-2xl p-6">
+      <div className="bg-[var(--surface)] border border-[var(--border)] rounded-xl p-6">
         <div className="flex items-center justify-between mb-3">
           <h2 className="font-semibold text-lg">
             {zh ? "檢查項目" : "Checkers"}
@@ -111,7 +111,7 @@ export default function ConfigStep({ manuscript, onStart, lang }: Props) {
                   : new Set(checkers.map((c) => c.name))
               )
             }
-            className="text-xs text-[var(--accent)]"
+            className="text-xs text-[var(--accent)] rounded focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]"
           >
             {selected.size === checkers.length
               ? zh
@@ -143,7 +143,7 @@ export default function ConfigStep({ manuscript, onStart, lang }: Props) {
                 type="checkbox"
                 checked={selected.has(c.name)}
                 onChange={() => toggle(c.name)}
-                className="accent-[var(--accent)]"
+                className="accent-[var(--accent)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]"
               />
               <span className="text-sm">
                 {zh ? c.label_zh : c.label_en}
@@ -157,7 +157,7 @@ export default function ConfigStep({ manuscript, onStart, lang }: Props) {
       <button
         onClick={() => onStart(journal, [...selected])}
         disabled={selected.size === 0}
-        className="w-full bg-[var(--accent)] hover:bg-[var(--accent)]/80 disabled:opacity-40 text-white font-semibold py-3 rounded-xl text-lg transition-colors"
+        className="w-full bg-[var(--accent)] hover:bg-[var(--accent-hover)] disabled:opacity-40 text-white font-semibold py-3 rounded-xl text-lg transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]"
       >
         {zh
           ? `開始檢查 (${selected.size} 個項目)`

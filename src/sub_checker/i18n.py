@@ -88,5 +88,11 @@ def t(key: str, lang: str = DEFAULT_LANG, **kwargs: Any) -> str:
 
 
 def checker_display_name(checker_name: str, lang: str = DEFAULT_LANG) -> str:
-    """Get localized display name for a checker."""
-    return t(f"checker_{checker_name}", lang) or checker_name
+    """Get localized display name for a checker.
+
+    t() returns the key itself when missing (never falsy), so an unknown
+    checker must be detected explicitly to fall back to the raw name.
+    """
+    key = f"checker_{checker_name}"
+    label = t(key, lang)
+    return checker_name if label == key else label

@@ -107,8 +107,7 @@ def format_html(report: Report, lang: str = "en") -> str:
     for result in report.results:
         display = checker_display_name(result.checker_name, lang)
         findings_html = ""
-        # Filter out findings marked as "filtered" by Phase 3 harness
-        active_findings = [f for f in result.findings if f.validation_status != "filtered"]
+        active_findings = result.active_findings
         if not active_findings:
             findings_html = f'<p class="no-issues">{tr("no_issues")}</p>'
         else:
@@ -124,12 +123,16 @@ def format_html(report: Report, lang: str = "en") -> str:
                     confidence_badge = (
                         f' <span class="confidence-badge downgraded">{f.confidence:.0%}</span>'
                     )
+                sev_class = f"sev-{f.severity.value}"
+                context_html = (
+                    f'<div class="finding-context">{_esc(f.context)}</div>' if f.context else ""
+                )
                 rows.append(
-                    f"<tr>"
+                    f'<tr class="{sev_class}">'
                     f'<td class="col-severity">{_severity_badge(f.severity, lang)}'
                     f"{confidence_badge}</td>"
                     f'<td class="col-location">{_esc(f.location)}</td>'
-                    f'<td class="col-message">{_esc(f.message)}</td>'
+                    f'<td class="col-message">{_esc(f.message)}{context_html}</td>'
                     f'<td class="col-suggestion">{_esc(f.suggestion)}</td>'
                     f"</tr>"
                 )
@@ -159,14 +162,17 @@ def format_html(report: Report, lang: str = "en") -> str:
 
         cot_html = _render_cot(result.cot_entries, lang)
 
+        # Native <details>: works without JS — survives sandboxed iframes
+        # (the GUI embeds this report with scripts disabled) and is
+        # keyboard-accessible out of the box.
         checker_sections.append(
-            f'<section class="checker">'
-            f'<div class="checker-header" onclick="this.parentElement.classList.toggle(\'collapsed\')">'
+            f'<details class="checker" open>'
+            f'<summary class="checker-header">'
             f"<h2>{_esc(display)}</h2>"
             f'<div class="checker-meta">{stats_html} · {result.elapsed_seconds:.1f}s</div>'
-            f"</div>"
+            f"</summary>"
             f'<div class="checker-body">{findings_html}{cot_html}</div>'
-            f"</section>"
+            f"</details>"
         )
 
     journal_html = (
@@ -174,6 +180,7 @@ def format_html(report: Report, lang: str = "en") -> str:
     )
     timestamp = report.timestamp.strftime("%Y-%m-%d %H:%M UTC")
     html_lang = "zh-Hant" if lang == "zh-TW" else "en"
+    all_label = "全部" if lang == "zh-TW" else "All"
 
     return f"""\
 <!DOCTYPE html>
@@ -198,8 +205,9 @@ def format_html(report: Report, lang: str = "en") -> str:
     --info: #5eb5f7;
     --info-bg: rgba(94,181,247,0.1);
     --success: #4ade80;
-    --font: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-    --mono: 'JetBrains Mono', 'Fira Code', 'SF Mono', Menlo, monospace;
+    /* System stacks only — the report must render offline with no webfonts */
+    --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    --mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
   }}
   * {{ margin: 0; padding: 0; box-sizing: border-box; }}
   body {{
@@ -262,7 +270,42 @@ def format_html(report: Report, lang: str = "en") -> str:
   .card-warning .number {{ color: var(--warning); }}
   .card-info .number {{ color: var(--info); }}
   .card-total .number {{ color: var(--text); }}
-  .card-cost .number {{ color: var(--success); font-size: 1.5rem; }}
+  /* Cost is a neutral metric, not a "success" */
+  .card-cost .number {{ color: var(--text-dim); font-size: 1.5rem; }}
+  .sev-filter {{
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 1.5rem;
+    flex-wrap: wrap;
+  }}
+  .sev-filter input {{ position: absolute; opacity: 0; pointer-events: none; }}
+  .sev-filter label {{
+    cursor: pointer;
+    padding: 0.35em 0.9em;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 0.8rem;
+    color: var(--text-dim);
+    user-select: none;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+  }}
+  .sev-filter label:hover {{ background: var(--surface2); color: var(--text); }}
+  .sev-filter input:checked + label {{
+    border-color: var(--accent);
+    color: var(--accent);
+    background: rgba(124,110,240,0.12);
+  }}
+  .sev-filter input:focus-visible + label {{
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }}
+  /* CSS-only severity filtering — works inside the GUI's sandboxed iframe */
+  body:has(#sevf-error:checked) .findings-table tr.sev-warning,
+  body:has(#sevf-error:checked) .findings-table tr.sev-info,
+  body:has(#sevf-warning:checked) .findings-table tr.sev-error,
+  body:has(#sevf-warning:checked) .findings-table tr.sev-info,
+  body:has(#sevf-info:checked) .findings-table tr.sev-error,
+  body:has(#sevf-info:checked) .findings-table tr.sev-warning {{ display: none; }}
   .checker {{
     background: var(--surface);
     border: 1px solid var(--border);
@@ -283,7 +326,24 @@ def format_html(report: Report, lang: str = "en") -> str:
   .checker-header h2 {{ font-size: 1rem; font-weight: 600; }}
   .checker-meta {{ font-size: 0.8rem; color: var(--text-dim); }}
   .checker-body {{ padding: 0 1.25rem 1.25rem; }}
-  .checker.collapsed .checker-body {{ display: none; }}
+  summary.checker-header {{ list-style: none; }}
+  summary.checker-header::-webkit-details-marker {{ display: none; }}
+  .checker-header::after {{
+    content: "▾";
+    color: var(--text-dim);
+    margin-left: 0.75rem;
+    transition: transform 0.15s;
+  }}
+  details.checker:not([open]) .checker-header::after {{ transform: rotate(-90deg); }}
+  .finding-context {{
+    margin-top: 0.4rem;
+    padding-left: 0.6rem;
+    border-left: 2px solid var(--border);
+    color: var(--text-dim);
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    white-space: pre-wrap;
+  }}
   .badge {{
     display: inline-block;
     padding: 0.15em 0.6em;
@@ -381,7 +441,7 @@ def format_html(report: Report, lang: str = "en") -> str:
     display: inline-block;
     padding: 0.1em 0.4em;
     border-radius: 4px;
-    font-size: 0.6rem;
+    font-size: 0.7rem;
     font-weight: 700;
     font-family: var(--mono);
     margin-left: 0.3em;
@@ -396,6 +456,28 @@ def format_html(report: Report, lang: str = "en") -> str:
     .findings-table {{ font-size: 0.8rem; }}
     .col-location {{ display: none; }}
   }}
+  @media print {{
+    /* Light tokens: the dark theme is unreadable / ink-hungry on paper */
+    :root {{
+      --bg: #ffffff;
+      --surface: #ffffff;
+      --surface2: #f4f5f8;
+      --border: #d4d7e0;
+      --text: #1a1d27;
+      --text-dim: #5a5f73;
+    }}
+    body {{ padding: 0; font-size: 12px; max-width: none; }}
+    h1 {{
+      background: none;
+      -webkit-text-fill-color: initial;
+      color: var(--text);
+    }}
+    .checker {{ break-inside: avoid; box-shadow: none; }}
+    .checker-header {{ cursor: default; }}
+    .checker-header::after {{ display: none; }}
+    .cot-details, .sev-filter {{ display: none; }}
+    .findings-table tbody tr:hover {{ background: none; }}
+  }}
 </style>
 </head>
 <body>
@@ -405,7 +487,7 @@ def format_html(report: Report, lang: str = "en") -> str:
   <div class="header-meta">
     <span>{tr("journal_label")}: <strong>{journal_html}</strong></span>
     <span>{tr("generated")}: {timestamp}</span>
-    <span>Model: <strong>{_esc(report.model) or "N/A"}</strong></span>
+    <span>Model: <strong>{_esc(report.model)}</strong></span>
   </div>
 </div>
 
@@ -430,6 +512,13 @@ def format_html(report: Report, lang: str = "en") -> str:
     <div class="number">${report.total_cost:.2f}</div>
     <div class="label">{tr("est_cost")}</div>
   </div>
+</div>
+
+<div class="sev-filter" role="group" aria-label="{tr("severity")}">
+  <input type="radio" name="sevf" id="sevf-all" checked><label for="sevf-all">{all_label}</label>
+  <input type="radio" name="sevf" id="sevf-error"><label for="sevf-error">{tr("errors")}</label>
+  <input type="radio" name="sevf" id="sevf-warning"><label for="sevf-warning">{tr("warnings")}</label>
+  <input type="radio" name="sevf" id="sevf-info"><label for="sevf-info">{tr("info")}</label>
 </div>
 
 {"".join(checker_sections)}

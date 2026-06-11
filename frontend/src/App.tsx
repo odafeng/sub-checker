@@ -50,8 +50,7 @@ export interface AgentProgress {
   elapsed?: number;
   error?: string;
   message?: string;
-  phase?: number;
-  agents?: string[];
+  total_agents?: number;
 }
 
 // Skip duplicate per-agent lifecycle events (e.g. from network retries)
@@ -66,12 +65,62 @@ function appendProgress(prev: AgentProgress[], msg: AgentProgress): AgentProgres
   return [...prev, msg];
 }
 
+const STEP_ORDER: Step[] = ["upload", "config", "running", "report"];
+
+const STEP_LABELS: Record<Step, { en: string; zh: string }> = {
+  upload: { en: "Upload", zh: "上傳" },
+  config: { en: "Config", zh: "設定" },
+  running: { en: "Running", zh: "檢查中" },
+  report: { en: "Report", zh: "報告" },
+};
+
+function Stepper({ step, lang }: { step: Step; lang: string }) {
+  const zh = lang === "zh-TW";
+  const current = STEP_ORDER.indexOf(step);
+  return (
+    <nav
+      aria-label={zh ? "進度" : "Progress"}
+      className="flex items-center justify-center mb-8"
+    >
+      {STEP_ORDER.map((s, i) => (
+        <div key={s} className="flex items-center">
+          {i > 0 && <div className="w-8 sm:w-12 h-px bg-[var(--border)] mx-2" />}
+          <div className="flex items-center gap-2">
+            <span
+              aria-current={i === current ? "step" : undefined}
+              className={`flex items-center justify-center w-6 h-6 rounded-full text-xs font-semibold ${
+                i < current
+                  ? "bg-[var(--accent)]/20 text-[var(--accent)]"
+                  : i === current
+                  ? "bg-[var(--accent)] text-white"
+                  : "bg-[var(--surface2)] text-[var(--text-dim)]"
+              }`}
+            >
+              {i < current ? "✓" : i + 1}
+            </span>
+            <span
+              className={`hidden sm:inline text-xs ${
+                i === current
+                  ? "text-[var(--text)] font-medium"
+                  : "text-[var(--text-dim)]"
+              }`}
+            >
+              {zh ? STEP_LABELS[s].zh : STEP_LABELS[s].en}
+            </span>
+          </div>
+        </div>
+      ))}
+    </nav>
+  );
+}
+
 export default function App() {
   const [step, setStep] = useState<Step>("upload");
   const [manuscript, setManuscript] = useState<ManuscriptInfo | null>(null);
   const [report, setReport] = useState<ReportData | null>(null);
   const [reportHtml, setReportHtml] = useState("");
   const [progress, setProgress] = useState<AgentProgress[]>([]);
+  const [totalAgents, setTotalAgents] = useState<number | null>(null);
   const [lang, setLang] = useState<"en" | "zh-TW">("en");
   const wsRef = useRef<WebSocket | null>(null);
 
@@ -95,6 +144,7 @@ export default function App() {
     if (!manuscript) return;
     setStep("running");
     setProgress([]);
+    setTotalAgents(null);
     closeWs();
 
     const wsUrl = `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws/check/${manuscript.session_id}`;
@@ -121,6 +171,9 @@ export default function App() {
         setStep("report");
         closeWs();
       } else {
+        if (msg.type === "run_start" && typeof msg.total_agents === "number") {
+          setTotalAgents(msg.total_agents);
+        }
         setProgress((prev) => appendProgress(prev, msg));
       }
     };
@@ -151,6 +204,7 @@ export default function App() {
     setReport(null);
     setReportHtml("");
     setProgress([]);
+    setTotalAgents(null);
   };
 
   return (
@@ -171,7 +225,7 @@ export default function App() {
           <select
             value={lang}
             onChange={(e) => setLang(e.target.value as "en" | "zh-TW")}
-            className="bg-[var(--surface)] border border-[var(--border)] rounded-lg px-3 py-1.5 text-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--accent)]"
+            className="bg-[var(--surface)] border border-[var(--border)] rounded-lg px-3 py-1.5 text-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]"
           >
             <option value="en">English</option>
             <option value="zh-TW">繁體中文</option>
@@ -179,13 +233,16 @@ export default function App() {
           {step !== "upload" && (
             <button
               onClick={onReset}
-              className="text-sm text-[var(--accent)] hover:underline"
+              className="text-sm text-[var(--accent)] hover:underline rounded focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]"
             >
               {lang === "zh-TW" ? "重新開始" : "Start Over"}
             </button>
           )}
         </div>
       </header>
+
+      {/* Wizard stepper */}
+      <Stepper step={step} lang={lang} />
 
       {/* Steps */}
       {step === "upload" && <UploadStep onUploaded={onUploaded} lang={lang} />}
@@ -196,7 +253,9 @@ export default function App() {
           lang={lang}
         />
       )}
-      {step === "running" && <RunningStep progress={progress} lang={lang} />}
+      {step === "running" && (
+        <RunningStep progress={progress} totalAgents={totalAgents} lang={lang} />
+      )}
       {step === "report" && report && (
         <ReportStep report={report} reportHtml={reportHtml} lang={lang} />
       )}

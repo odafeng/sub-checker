@@ -21,3 +21,13 @@ describe("App", () => {
     expect(screen.getByText(/drop your manuscript/i)).toBeInTheDocument();
   });
 });
+
+describe("App stepper", () => {
+  it("renders all four wizard steps", () => {
+    render(<App />);
+    expect(screen.getByText("Upload")).toBeInTheDocument();
+    expect(screen.getByText("Config")).toBeInTheDocument();
+    expect(screen.getByText("Running")).toBeInTheDocument();
+    expect(screen.getByText("Report")).toBeInTheDocument();
+  });
+});

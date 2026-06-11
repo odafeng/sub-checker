@@ -6,7 +6,7 @@ const CHECKERS = [
   { name: "figure_table", en: "Figure & Table", zh: "圖表檢查", icon: "□▪", color: "#5eb5f7" },
   { name: "citation_exist", en: "Citation Existence", zh: "引用完整性", icon: "「」", color: "#f0a73a" },
   { name: "citation_format", en: "Citation Format", zh: "引用格式", icon: "§", color: "#4ade80" },
-  { name: "journal_guidelines", en: "Journal Guidelines", zh: "期刊投稿規範", icon: "📋", color: "#f472b6" },
+  { name: "journal_guidelines", en: "Journal Guidelines", zh: "期刊投稿規範", icon: "¶", color: "#f472b6" },
   { name: "logic", en: "Logic Consistency", zh: "邏輯一致性", icon: "⟷", color: "#c084fc" },
   { name: "citation_claim", en: "Citation-Claim", zh: "引用-主張驗證", icon: "✓?", color: "#fb923c" },
   { name: "deterministic_check", en: "Deterministic Validation", zh: "確定性驗證", icon: "fx", color: "#94a3b8" },
@@ -15,8 +15,14 @@ const CHECKERS = [
 
 interface Props {
   progress: AgentProgress[];
+  /** Agent count from the run_start message; harness phases are added on top. */
+  totalAgents?: number | null;
   lang: string;
 }
+
+// Harness phases (deterministic_check + reviewer) run after the agents but
+// are not included in run_start's total_agents.
+const HARNESS_PHASES = 2;
 
 function Spinner({ color }: { color: string }) {
   return (
@@ -63,7 +69,7 @@ function ElapsedTimer() {
   return <span className="font-mono text-xs tabular-nums">{m}:{s.toString().padStart(2, "0")}</span>;
 }
 
-export default function RunningStep({ progress, lang }: Props) {
+export default function RunningStep({ progress, totalAgents, lang }: Props) {
   const zh = lang === "zh-TW";
   const started = new Set<string>();
   const done = new Map<string, { findings: number; elapsed: number }>();
@@ -93,13 +99,19 @@ export default function RunningStep({ progress, lang }: Props) {
       }
   );
   const doneCount = done.size + errors.size;
-  const totalCount = started.size;
-  const pct = totalCount > 0 ? Math.round((doneCount / totalCount) * 100) : 0;
+  // Fixed denominator from run_start keeps the ring monotonic; the fallback
+  // (agents seen so far) can still regress but never overshoots 100%.
+  const totalCount =
+    totalAgents != null
+      ? totalAgents + HARNESS_PHASES
+      : Math.max(started.size, doneCount);
+  const pct =
+    totalCount > 0 ? Math.min(100, Math.round((doneCount / totalCount) * 100)) : 0;
 
   return (
     <div className="space-y-8">
       {/* Header with overall progress */}
-      <div className="text-center space-y-4">
+      <div className="text-center space-y-4" aria-live="polite">
         <div className="relative inline-flex items-center justify-center">
           {/* Animated ring */}
           <svg width="120" height="120" viewBox="0 0 120 120" className="transform -rotate-90">
@@ -124,7 +136,7 @@ export default function RunningStep({ progress, lang }: Props) {
           <h2 className="text-xl font-semibold">
             {zh ? "AI 正在審查你的文稿" : "AI is reviewing your manuscript"}
           </h2>
-          <p className="text-sm text-[#8b90a5] mt-1">
+          <p className="text-sm text-[var(--text-dim)] mt-1">
             {doneCount}/{totalCount} {zh ? "項檢查完成" : "checks completed"}
           </p>
         </div>
@@ -132,7 +144,7 @@ export default function RunningStep({ progress, lang }: Props) {
 
       {/* Global errors (connection failures etc.) */}
       {globalErrors.length > 0 && (
-        <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-[var(--error)]">
+        <div className="rounded-xl border border-[var(--error)]/30 bg-[var(--error)]/10 p-4 text-sm text-[var(--error)]">
           {globalErrors.map((msg, i) => (
             <p key={`${msg}-${i}`}>{msg}</p>
           ))}
@@ -150,7 +162,7 @@ export default function RunningStep({ progress, lang }: Props) {
           return (
             <div
               key={checker.name}
-              className="relative overflow-hidden rounded-2xl transition-all duration-500"
+              className="relative overflow-hidden rounded-xl transition-all duration-500"
               style={{
                 background: isRunning
                   ? `linear-gradient(135deg, ${checker.color}08, ${checker.color}15)`
@@ -216,7 +228,7 @@ export default function RunningStep({ progress, lang }: Props) {
                           </span>
                         )}
                       </div>
-                      <div className="text-xs text-[#8b90a5] font-mono">
+                      <div className="text-xs text-[var(--text-dim)] font-mono">
                         {info.elapsed}s
                       </div>
                     </div>
@@ -252,7 +264,7 @@ export default function RunningStep({ progress, lang }: Props) {
       {started.size === 0 && (
         <div className="flex flex-col items-center gap-4 py-16">
           <Spinner color="var(--accent)" />
-          <p className="text-[#8b90a5]">
+          <p className="text-[var(--text-dim)]">
             {zh ? "正在連線至 AI 引擎..." : "Connecting to AI engine..."}
           </p>
         </div>

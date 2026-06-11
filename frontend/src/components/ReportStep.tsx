@@ -8,10 +8,44 @@ interface Props {
 }
 
 const SEV_COLORS = {
-  error: { bg: "bg-red-500/10", text: "text-red-400", border: "border-red-500/30" },
-  warning: { bg: "bg-amber-500/10", text: "text-amber-400", border: "border-amber-500/30" },
-  info: { bg: "bg-blue-500/10", text: "text-blue-400", border: "border-blue-500/30" },
+  error: {
+    bg: "bg-[var(--error)]/10",
+    text: "text-[var(--error)]",
+    border: "border-[var(--error)]/30",
+    ring: "ring-[var(--error)]",
+  },
+  warning: {
+    bg: "bg-[var(--warning)]/10",
+    text: "text-[var(--warning)]",
+    border: "border-[var(--warning)]/30",
+    ring: "ring-[var(--warning)]",
+  },
+  info: {
+    bg: "bg-[var(--info)]/10",
+    text: "text-[var(--info)]",
+    border: "border-[var(--info)]/30",
+    ring: "ring-[var(--info)]",
+  },
 };
+
+type Severity = keyof typeof SEV_COLORS;
+
+const FOCUS_RING =
+  "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]";
+
+function DownloadIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path
+        d="M8 2v8m0 0L5 7m3 3l3-3M3 13h10"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
 
 const SEV_LABEL = {
   error: { en: "ERROR", zh: "錯誤" },
@@ -37,14 +71,14 @@ function Badge({ severity, lang }: { severity: string; lang: string }) {
 function ConfidenceBadge({ status, confidence }: { status: string; confidence: number }) {
   if (status === "confirmed") {
     return (
-      <span className="inline-block px-1.5 py-0.5 rounded text-[10px] font-bold font-mono bg-emerald-500/15 text-emerald-400 ml-1.5">
+      <span className="inline-block px-1.5 py-0.5 rounded text-[11px] font-bold font-mono bg-[var(--success)]/15 text-[var(--success)] ml-1.5">
         {Math.round(confidence * 100)}%
       </span>
     );
   }
   if (status === "downgraded") {
     return (
-      <span className="inline-block px-1.5 py-0.5 rounded text-[10px] font-bold font-mono bg-amber-500/15 text-amber-400 ml-1.5">
+      <span className="inline-block px-1.5 py-0.5 rounded text-[11px] font-bold font-mono bg-[var(--warning)]/15 text-[var(--warning)] ml-1.5">
         {Math.round(confidence * 100)}%
       </span>
     );
@@ -64,13 +98,19 @@ function FindingRow({ f, lang }: { f: Finding; lang: string }) {
         <div className="flex-1 min-w-0">
           <p className="text-sm">{f.message}</p>
           {f.location && (
-            <p className="text-xs text-[#8b90a5] font-mono mt-1">
-              📍 {f.location}
+            <p className="text-xs text-[var(--text-dim)] font-mono mt-1">
+              <span className="font-sans uppercase tracking-wide mr-1">Loc</span>
+              {f.location}
+            </p>
+          )}
+          {f.context && (
+            <p className="text-xs text-[var(--text-dim)] font-mono mt-1.5 pl-3 border-l-2 border-[var(--border)] line-clamp-2">
+              {f.context}
             </p>
           )}
           {f.suggestion && (
-            <p className="text-xs text-[var(--accent)] mt-1">
-              💡 {zh ? "建議" : "Suggestion"}: {f.suggestion}
+            <p className="text-xs text-[var(--accent)] mt-1.5 border-l-2 border-[var(--accent)]/40 pl-2">
+              {zh ? "建議" : "Suggestion"}: {f.suggestion}
             </p>
           )}
         </div>
@@ -82,6 +122,7 @@ function FindingRow({ f, lang }: { f: Finding; lang: string }) {
 export default function ReportStep({ report, reportHtml, lang }: Props) {
   const [view, setView] = useState<"cards" | "html">("cards");
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [sevFilter, setSevFilter] = useState<Severity | null>(null);
   const zh = lang === "zh-TW";
 
   const toggle = (name: string) => {
@@ -93,33 +134,60 @@ export default function ReportStep({ report, reportHtml, lang }: Props) {
     });
   };
 
-  // Filter out filtered findings from all results for card view
-  const filteredResults = report.results.map((r) => ({
-    ...r,
-    findings: r.findings.filter((f) => f.validation_status !== "filtered"),
-  }));
+  // Filter out filtered findings (and apply the severity filter) for card view
+  const filteredResults = report.results
+    .map((r) => ({
+      ...r,
+      findings: r.findings.filter(
+        (f) =>
+          f.validation_status !== "filtered" &&
+          (!sevFilter || f.severity === sevFilter)
+      ),
+    }))
+    .filter((r) => !sevFilter || r.findings.length > 0);
 
   return (
     <div className="space-y-6">
       {/* Model info */}
       {report.model && (
-        <div className="text-xs text-[#8b90a5] text-right">
+        <div className="text-xs text-[var(--text-dim)] text-right">
           Model: <span className="font-mono font-medium text-[var(--text)]">{report.model}</span>
         </div>
       )}
 
-      {/* Summary cards */}
-      <div className="grid grid-cols-5 gap-3">
+      {/* Summary cards — severity cards toggle filtering the findings list */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3">
+        {(
+          [
+            { sev: "error" as const, n: report.summary.error, label: zh ? "錯誤" : "Errors" },
+            { sev: "warning" as const, n: report.summary.warning, label: zh ? "警告" : "Warnings" },
+            { sev: "info" as const, n: report.summary.info, label: zh ? "資訊" : "Info" },
+          ]
+        ).map((c) => (
+          <button
+            key={c.label}
+            type="button"
+            onClick={() => setSevFilter((prev) => (prev === c.sev ? null : c.sev))}
+            aria-pressed={sevFilter === c.sev}
+            className={`bg-[var(--surface)] border border-[var(--border)] rounded-xl p-4 text-center cursor-pointer transition-colors hover:bg-[var(--surface2)] ${FOCUS_RING} ${
+              sevFilter === c.sev ? `ring-2 ${SEV_COLORS[c.sev].ring}` : ""
+            }`}
+          >
+            <div className={`text-2xl font-bold font-mono ${SEV_COLORS[c.sev].text}`}>
+              {c.n}
+            </div>
+            <div className="text-xs text-[var(--text-dim)] uppercase mt-1">
+              {c.label}
+            </div>
+          </button>
+        ))}
         {[
-          { n: report.summary.error, label: zh ? "錯誤" : "Errors", cls: "text-[var(--error)]" },
-          { n: report.summary.warning, label: zh ? "警告" : "Warnings", cls: "text-[var(--warning)]" },
-          { n: report.summary.info, label: zh ? "資訊" : "Info", cls: "text-[var(--info)]" },
           {
             n: report.summary.error + report.summary.warning + report.summary.info,
             label: zh ? "合計" : "Total",
-            cls: "text-white",
+            cls: "text-[var(--text)]",
           },
-          { n: `$${report.total_cost.toFixed(2)}`, label: zh ? "費用" : "Cost", cls: "text-[var(--success)]" },
+          { n: `$${report.total_cost.toFixed(2)}`, label: zh ? "費用" : "Cost", cls: "text-[var(--text-dim)]" },
         ].map((c) => (
           <div
             key={c.label}
@@ -128,7 +196,7 @@ export default function ReportStep({ report, reportHtml, lang }: Props) {
             <div className={`text-2xl font-bold font-mono ${c.cls}`}>
               {c.n}
             </div>
-            <div className="text-xs text-[#8b90a5] uppercase mt-1">
+            <div className="text-xs text-[var(--text-dim)] uppercase mt-1">
               {c.label}
             </div>
           </div>
@@ -136,27 +204,29 @@ export default function ReportStep({ report, reportHtml, lang }: Props) {
       </div>
 
       {/* View toggle */}
-      <div className="flex gap-2">
-        <button
-          onClick={() => setView("cards")}
-          className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-            view === "cards"
-              ? "bg-[var(--accent)] text-white"
-              : "bg-[var(--surface)] text-[#8b90a5]"
-          }`}
-        >
-          {zh ? "卡片檢視" : "Card View"}
-        </button>
-        <button
-          onClick={() => setView("html")}
-          className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-            view === "html"
-              ? "bg-[var(--accent)] text-white"
-              : "bg-[var(--surface)] text-[#8b90a5]"
-          }`}
-        >
-          {zh ? "HTML 報告" : "HTML Report"}
-        </button>
+      <div className="flex items-center gap-2">
+        <div className="inline-flex rounded-lg bg-[var(--surface)] p-0.5 border border-[var(--border)]">
+          <button
+            onClick={() => setView("cards")}
+            className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${FOCUS_RING} ${
+              view === "cards"
+                ? "bg-[var(--accent)] text-white"
+                : "text-[var(--text-dim)] hover:bg-[var(--surface2)] hover:text-[var(--text)]"
+            }`}
+          >
+            {zh ? "卡片檢視" : "Card View"}
+          </button>
+          <button
+            onClick={() => setView("html")}
+            className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${FOCUS_RING} ${
+              view === "html"
+                ? "bg-[var(--accent)] text-white"
+                : "text-[var(--text-dim)] hover:bg-[var(--surface2)] hover:text-[var(--text)]"
+            }`}
+          >
+            {zh ? "HTML 報告" : "HTML Report"}
+          </button>
+        </div>
         <button
           onClick={() => {
             const blob = new Blob([reportHtml], { type: "text/html" });
@@ -167,9 +237,9 @@ export default function ReportStep({ report, reportHtml, lang }: Props) {
             a.click();
             URL.revokeObjectURL(url);
           }}
-          className="ml-auto px-4 py-1.5 rounded-lg text-sm font-medium bg-[var(--surface)] text-[var(--accent)] hover:bg-[var(--surface2)] transition-colors"
+          className={`ml-auto inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-medium bg-[var(--surface)] text-[var(--accent)] hover:bg-[var(--surface2)] transition-colors ${FOCUS_RING}`}
         >
-          ⬇ {zh ? "下載 HTML" : "Download HTML"}
+          <DownloadIcon /> {zh ? "下載 HTML" : "Download HTML"}
         </button>
       </div>
 
@@ -183,12 +253,12 @@ export default function ReportStep({ report, reportHtml, lang }: Props) {
             >
               <button
                 onClick={() => toggle(r.checker)}
-                className="w-full flex items-center justify-between p-4 hover:bg-[var(--surface2)] transition-colors"
+                className={`w-full flex items-center justify-between p-4 hover:bg-[var(--surface2)] transition-colors ${FOCUS_RING}`}
               >
                 <h3 className="font-semibold">
                   {r.display_name ?? r.checker}
                 </h3>
-                <div className="flex items-center gap-3 text-sm text-[#8b90a5]">
+                <div className="flex items-center gap-3 text-sm text-[var(--text-dim)]">
                   {r.findings.filter((f) => f.severity === "error").length >
                     0 && (
                     <span className="text-[var(--error)]">
