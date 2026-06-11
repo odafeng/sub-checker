@@ -11,6 +11,7 @@ from sub_checker.tools.manuscript_tools import (
 
 class TypoGrammarAgent(BaseCheckerAgent):
     name = "typo_grammar"
+    effort = "low"  # mechanical: pattern/cross-ref work, less thinking needed
 
     def _default_system_prompt(self) -> str:
         return (

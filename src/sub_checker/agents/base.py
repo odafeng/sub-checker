@@ -69,6 +69,10 @@ class BaseCheckerAgent(ABC):
     """
 
     name: str = "base"
+    # Reasoning depth / token budget. Mechanical checkers (pattern matching,
+    # cross-referencing) override this down to save output tokens; judgment-
+    # heavy checkers keep "high". GA on Sonnet 4.6 and Opus 4.6+.
+    effort: str = "high"
 
     def __init__(self, model: str = "claude-opus-4-8"):
         self.model = model
@@ -247,9 +251,11 @@ class BaseCheckerAgent(ABC):
 
                     extra: dict[str, Any] = {}
                     if supports_adaptive_thinking(self.model):
-                        # Judgment-heavy checking benefits from letting the
-                        # model decide when/how much to think.
+                        # Adaptive thinking + per-checker effort: low effort
+                        # keeps thinking minimal (and avoids reasoning leaking
+                        # into the visible response on Opus 4.8).
                         extra["thinking"] = {"type": "adaptive"}
+                        extra["output_config"] = {"effort": self.effort}
                     response = await client.messages.create(
                         model=self.model,
                         max_tokens=16000,

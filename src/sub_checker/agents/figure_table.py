@@ -17,6 +17,7 @@ from sub_checker.tools.manuscript_tools import (
 
 class FigureTableAgent(BaseCheckerAgent):
     name = "figure_table"
+    effort = "medium"  # mechanical: pattern/cross-ref work, less thinking needed
 
     def _default_system_prompt(self) -> str:
         return (

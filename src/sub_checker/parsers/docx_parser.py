@@ -102,7 +102,7 @@ def parse_docx(docx_path: Path, figure_dir: Path | None = None) -> Manuscript:
     header_lines: list[str] = []  # Text before first heading
     first_heading_seen = False
 
-    def add_content_paragraph(text: str) -> None:
+    def add_content_paragraph(text: str, is_table: bool = False) -> None:
         p = Paragraph(
             text=text,
             index=len(paragraphs),
@@ -111,7 +111,10 @@ def parse_docx(docx_path: Path, figure_dir: Path | None = None) -> Manuscript:
         paragraphs.append(p)
         if current_section:
             current_section.paragraphs.append(p)
-        if in_references:
+        # Table rows are never references — even when a table is laid out after
+        # the "References" heading, it must not pollute the reference list
+        # (which would inflate the count and fabricate "uncited" numbers).
+        if in_references and not is_table:
             ref_lines.append(text)
         else:
             body_lines.append(text)
@@ -121,7 +124,7 @@ def parse_docx(docx_path: Path, figure_dir: Path | None = None) -> Manuscript:
             # Table content stays in document order, attached to the current
             # section, so checkers can see in-table inconsistencies.
             for row_text in _table_row_texts(block):
-                add_content_paragraph(row_text)
+                add_content_paragraph(row_text, is_table=True)
             continue
 
         para = block

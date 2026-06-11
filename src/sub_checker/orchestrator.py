@@ -210,6 +210,7 @@ async def run_all_phases(
     Returns (results, harness_usage) where harness_usage is the reviewer
     agent's token usage (for cost accounting).
     """
+    from sub_checker.harness.dedup import deduplicate_cross_checker
     from sub_checker.harness.deterministic import run_deterministic_checks
     from sub_checker.harness.reviewer import run_reviewer
 
@@ -270,5 +271,8 @@ async def run_all_phases(
             "reviewer",
             {"confirmed": confirmed, "filtered": filtered_rev, "elapsed": 0.0},
         )
+
+    # --- Cross-checker dedup (after reviewer: confidence scores are final) ---
+    deduplicate_cross_checker(results)
 
     return results, harness_usage

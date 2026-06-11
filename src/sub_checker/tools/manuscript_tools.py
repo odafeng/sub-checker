@@ -37,11 +37,28 @@ def extract_citation_numbers(raw_text: str) -> set[int]:
     return cited
 
 
-def count_references(reference_section: str | None) -> int:
-    """Count references in the reference list by counting non-empty lines."""
+_REF_ENTRY_START = re.compile(r"^\d{1,3}[.)\s]")
+
+
+def reference_entries(reference_section: str | None) -> list[str]:
+    """Reconstruct reference entries from the reference section.
+
+    A numbered list ("1. ...", "2) ...") is split on the numbered lines, so
+    wrapped continuation lines and stray non-reference content (table
+    captions/notes that the parser couldn't fully separate) don't inflate the
+    count. If no line is numbered (Word auto-numbering stripped during
+    extraction), every non-empty line is treated as an entry.
+    """
     if not reference_section:
-        return 0
-    return len([line for line in reference_section.strip().split("\n") if line.strip()])
+        return []
+    lines = [line.strip() for line in reference_section.split("\n") if line.strip()]
+    numbered = [line for line in lines if _REF_ENTRY_START.match(line)]
+    return numbered if numbered else lines
+
+
+def count_references(reference_section: str | None) -> int:
+    """Count reference entries in the reference list."""
+    return len(reference_entries(reference_section))
 
 
 def read_section(manuscript: Manuscript, section_name: str) -> str:

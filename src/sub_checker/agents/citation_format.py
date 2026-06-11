@@ -20,6 +20,7 @@ from sub_checker.tools.web_tools import (
 
 class CitationFormatAgent(BaseCheckerAgent):
     name = "citation_format"
+    effort = "medium"  # mechanical: pattern/cross-ref work, less thinking needed
 
     def __init__(self, model: str = "claude-opus-4-8"):
         super().__init__(model=model)

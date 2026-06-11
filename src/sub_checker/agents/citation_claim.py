@@ -17,6 +17,7 @@ from sub_checker.tools.manuscript_tools import (
     TOOL_READ_SECTION,
     get_reference_list,
     read_section,
+    reference_entries,
 )
 from sub_checker.tools.pubmed_tools import (
     TOOL_GET_ABSTRACT,
@@ -121,13 +122,12 @@ class CitationClaimAgent(BaseCheckerAgent):
         crossref = CrossrefClient(max_concurrent=3, mailto=config.claim.pubmed_email)
 
         try:
-            # Run multi-source verification as harness pre-pass
-            if manuscript.reference_section:
-                ref_lines = [
-                    line
-                    for line in manuscript.reference_section.strip().split("\n")
-                    if line.strip()
-                ]
+            # Run multi-source verification as harness pre-pass. Use
+            # reconstructed entries, not raw lines — verifying table captions
+            # and wrapped fragments wastes 3 API calls each and pollutes the
+            # report with bogus NOT_FOUND rows.
+            ref_lines = reference_entries(manuscript.reference_section)
+            if ref_lines:
                 logger.info(
                     "Running multi-source verification for %d references...", len(ref_lines)
                 )
