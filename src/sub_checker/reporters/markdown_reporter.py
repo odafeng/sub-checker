@@ -8,6 +8,13 @@ from sub_checker.models import Report, Severity
 _SEVERITY_KEY = {Severity.ERROR: "error", Severity.WARNING: "warning", Severity.INFO: "info_label"}
 
 
+def _cell(text: str | None, fallback: str = "—") -> str:
+    """Escape untrusted text for a markdown table cell."""
+    if not text:
+        return fallback
+    return text.replace("|", "\\|").replace("\n", "<br>")
+
+
 def format_markdown(report: Report, lang: str = "en") -> str:
     tr = lambda key: t(key, lang)  # noqa: E731
 
@@ -31,7 +38,7 @@ def format_markdown(report: Report, lang: str = "en") -> str:
         lines.append(f"## {display} ({result.elapsed_seconds:.1f}s)")
         lines.append("")
 
-        active_findings = [f for f in result.findings if f.validation_status != "filtered"]
+        active_findings = result.active_findings
         if not active_findings:
             lines.append(tr("no_issues"))
             lines.append("")
@@ -44,9 +51,9 @@ def format_markdown(report: Report, lang: str = "en") -> str:
 
         for f in active_findings:
             sev = tr(_SEVERITY_KEY[f.severity])
-            loc = f.location or "—"
-            sug = f.suggestion or "—"
-            lines.append(f"| {sev} | {loc} | {f.message} | {sug} |")
+            lines.append(
+                f"| {sev} | {_cell(f.location)} | {_cell(f.message)} | {_cell(f.suggestion)} |"
+            )
 
         lines.append("")
 

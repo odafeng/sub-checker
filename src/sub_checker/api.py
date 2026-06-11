@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import contextlib
-import json
+import logging
 import shutil
 import tempfile
 import time
@@ -22,9 +22,11 @@ from sub_checker.models import Manuscript, Report
 from sub_checker.orchestrator import build_report, create_agents, filter_agents, run_all_phases
 from sub_checker.parsers.docx_parser import parse_docx
 from sub_checker.reporters.html_reporter import format_html
-from sub_checker.reporters.json_reporter import format_json
+from sub_checker.reporters.json_reporter import report_to_dict
 
 load_dotenv()
+
+logger = logging.getLogger("sub_checker.api")
 
 _MAX_UPLOAD_BYTES = 20 * 1024 * 1024  # 20 MB
 
@@ -53,12 +55,16 @@ _SESSION_TTL = 3600  # 1 hour
 
 
 def _cleanup_stale_sessions() -> None:
-    """Remove sessions older than TTL and their temp dirs."""
+    """Remove sessions older than TTL and their temp dirs.
+
+    Sessions with a check in progress are never pruned — deleting one
+    mid-run would crash the run after the LLM cost was already incurred.
+    """
     now = time.monotonic()
     stale = [
         sid
         for sid, data in _active_runs.items()
-        if now - data.get("created_at", now) > _SESSION_TTL
+        if now - data.get("created_at", now) > _SESSION_TTL and not data.get("running")
     ]
     for sid in stale:
         tmp_dir = _active_runs[sid].get("tmp_dir")
@@ -86,7 +92,7 @@ async def list_checkers() -> list[dict]:
 @app.post("/api/upload")
 async def upload_manuscript(file: UploadFile) -> dict:
     """Upload a .docx file. Returns a session_id and parsed metadata."""
-    if not file.filename or not file.filename.endswith(".docx"):
+    if not file.filename or not file.filename.lower().endswith(".docx"):
         raise HTTPException(status_code=400, detail="Please upload a .docx file")
 
     # Sanitize filename before creating any temp resources
@@ -94,12 +100,22 @@ async def upload_manuscript(file: UploadFile) -> dict:
     if not safe_name or safe_name != file.filename.replace("\\", "/").split("/")[-1]:
         raise HTTPException(status_code=400, detail="Invalid filename")
 
-    content = await file.read()
-    if len(content) > _MAX_UPLOAD_BYTES:
-        raise HTTPException(
-            status_code=413,
-            detail=f"File too large (max {_MAX_UPLOAD_BYTES // (1024 * 1024)} MB)",
-        )
+    # Read in chunks and abort as soon as the limit is exceeded — reading the
+    # whole body first would buffer a multi-GB upload into memory.
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = await file.read(1024 * 1024)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > _MAX_UPLOAD_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=f"File too large (max {_MAX_UPLOAD_BYTES // (1024 * 1024)} MB)",
+            )
+        chunks.append(chunk)
+    content = b"".join(chunks)
 
     session_id = uuid.uuid4().hex[:12]
     tmp_dir = Path(tempfile.mkdtemp(prefix=f"subcheck_{session_id}_"))
@@ -147,13 +163,22 @@ async def websocket_check(websocket: WebSocket, session_id: str) -> None:
         await websocket.close()
         return
 
+    run_data = _active_runs[session_id]
+    if run_data.get("running"):
+        # A second tab / reconnect must not launch a duplicate (expensive) run.
+        await websocket.send_json(
+            {"type": "error", "message": "A check is already running for this session"}
+        )
+        await websocket.close()
+        return
+
+    run_data["running"] = True
     try:
         config_msg = await websocket.receive_json()
         journal = config_msg.get("journal", "")
         selected = set(config_msg.get("checkers", []))
         lang = config_msg.get("lang", "en")
 
-        run_data = _active_runs[session_id]
         manuscript: Manuscript = run_data["manuscript"]
 
         config = Config(output_lang=lang)
@@ -181,9 +206,9 @@ async def websocket_check(websocket: WebSocket, session_id: str) -> None:
         )
 
         # Store report for later retrieval via REST endpoint
-        _active_runs[session_id]["report"] = report
+        run_data["report"] = report
 
-        report_json = json.loads(format_json(report))
+        report_json = report_to_dict(report)
         for r in report_json["results"]:
             r["display_name"] = checker_display_name(r["checker"], lang)
 
@@ -193,9 +218,15 @@ async def websocket_check(websocket: WebSocket, session_id: str) -> None:
 
     except WebSocketDisconnect:
         pass
-    except Exception as e:
+    except Exception:
+        # Don't leak internal paths/stack details to the client.
+        logger.exception("Check run failed for session %s", session_id)
         with contextlib.suppress(Exception):
-            await websocket.send_json({"type": "error", "message": str(e)})
+            await websocket.send_json(
+                {"type": "error", "message": "Internal error while running the check"}
+            )
+    finally:
+        run_data["running"] = False
 
 
 @app.get("/api/report/{session_id}/html")

@@ -118,3 +118,31 @@ def test_parse_docx_body_text_excludes_reference_list(tmp_path: Path):
     from sub_checker.tools.manuscript_tools import extract_citation_numbers
 
     assert extract_citation_numbers(ms.body_text) == {1}
+
+
+def test_parse_docx_table_content_visible(tmp_path: Path):
+    """Table cell text must reach raw_text and the enclosing section."""
+    import docx
+
+    doc = docx.Document()
+    doc.add_heading("Results", level=1)
+    doc.add_paragraph("As shown in Table 1, outcomes differed.")
+    table = doc.add_table(rows=2, cols=2)
+    table.cell(0, 0).text = "Group"
+    table.cell(0, 1).text = "Survival rate"
+    table.cell(1, 0).text = "Treatment X"
+    table.cell(1, 1).text = "85.3%"
+    doc.add_heading("Discussion", level=1)
+    doc.add_paragraph("We discuss the results here.")
+    path = tmp_path / "with_table.docx"
+    doc.save(path)
+
+    ms = parse_docx(path, None)
+    assert "Survival rate" in ms.raw_text
+    assert "85.3%" in ms.raw_text
+    # Table rows are attached to the section they appear in
+    results = next(s for s in ms.sections if s.heading == "Results")
+    assert any("85.3%" in p.text for p in results.paragraphs)
+    # And not leaked into the next section
+    discussion = next(s for s in ms.sections if s.heading == "Discussion")
+    assert not any("85.3%" in p.text for p in discussion.paragraphs)

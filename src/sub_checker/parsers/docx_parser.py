@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterator
 from pathlib import Path
 
 import docx
+from docx.oxml.ns import qn
+from docx.table import Table
+from docx.text.paragraph import Paragraph as DocxParagraph
 
 from sub_checker.models import Manuscript, Paragraph, Section
 
@@ -56,6 +60,34 @@ def _pick_title(header_lines: list[str], sections: list[Section]) -> str:
     return header_lines[0] if header_lines else "Untitled"
 
 
+def _iter_block_items(doc) -> Iterator[DocxParagraph | Table]:
+    """Yield paragraphs AND tables in true document order.
+
+    `doc.paragraphs` skips tables entirely, making table content (e.g.
+    Table 1 data, headers, footnotes) invisible to every checker.
+    """
+    for child in doc.element.body.iterchildren():
+        if child.tag == qn("w:p"):
+            yield DocxParagraph(child, doc)
+        elif child.tag == qn("w:tbl"):
+            yield Table(child, doc)
+
+
+def _table_row_texts(table: Table) -> list[str]:
+    """Flatten a table into one text line per row ('cell | cell | cell')."""
+    rows = []
+    for row in table.rows:
+        cells: list[str] = []
+        for cell in row.cells:
+            ct = " ".join(cell.text.split())
+            # Merged cells repeat the same object — skip consecutive dups
+            if ct and (not cells or cells[-1] != ct):
+                cells.append(ct)
+        if cells:
+            rows.append(" | ".join(cells))
+    return rows
+
+
 def parse_docx(docx_path: Path, figure_dir: Path | None = None) -> Manuscript:
     """Parse a .docx file into a Manuscript model."""
     doc = docx.Document(str(docx_path))
@@ -70,7 +102,29 @@ def parse_docx(docx_path: Path, figure_dir: Path | None = None) -> Manuscript:
     header_lines: list[str] = []  # Text before first heading
     first_heading_seen = False
 
-    for para in doc.paragraphs:
+    def add_content_paragraph(text: str) -> None:
+        p = Paragraph(
+            text=text,
+            index=len(paragraphs),
+            section=current_section.heading if current_section else None,
+        )
+        paragraphs.append(p)
+        if current_section:
+            current_section.paragraphs.append(p)
+        if in_references:
+            ref_lines.append(text)
+        else:
+            body_lines.append(text)
+
+    for block in _iter_block_items(doc):
+        if isinstance(block, Table):
+            # Table content stays in document order, attached to the current
+            # section, so checkers can see in-table inconsistencies.
+            for row_text in _table_row_texts(block):
+                add_content_paragraph(row_text)
+            continue
+
+        para = block
         text = para.text.strip()
         if not text:
             continue
@@ -104,20 +158,7 @@ def parse_docx(docx_path: Path, figure_dir: Path | None = None) -> Manuscript:
         if not first_heading_seen:
             header_lines.append(text)
 
-        p = Paragraph(
-            text=text,
-            index=len(paragraphs),
-            section=current_section.heading if current_section else None,
-        )
-        paragraphs.append(p)
-
-        if current_section:
-            current_section.paragraphs.append(p)
-
-        if in_references:
-            ref_lines.append(text)
-        else:
-            body_lines.append(text)
+        add_content_paragraph(text)
 
     if ref_lines:
         reference_section = "\n".join(ref_lines)

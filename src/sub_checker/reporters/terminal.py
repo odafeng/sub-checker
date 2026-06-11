@@ -46,7 +46,7 @@ def print_report(report: Report, console: Console | None = None, lang: str = "en
     # Findings by checker
     for result in report.results:
         display = checker_display_name(result.checker_name, lang)
-        active_findings = [f for f in result.findings if f.validation_status != "filtered"]
+        active_findings = result.active_findings
         if not active_findings:
             console.print(f"[green]  {display}: {tr('no_issues')}[/green]")
             continue

@@ -8,7 +8,8 @@ from typing import Any
 from sub_checker.models import Report
 
 
-def format_json(report: Report) -> str:
+def report_to_dict(report: Report) -> dict[str, Any]:
+    """Build the report's JSON-serializable dict (single source of truth)."""
     data: dict[str, Any] = {
         "manuscript_path": report.manuscript_path,
         "timestamp": report.timestamp.isoformat(),
@@ -20,8 +21,6 @@ def format_json(report: Report) -> str:
     }
 
     for r in report.results:
-        # Only include non-filtered findings
-        active_findings = [f for f in r.findings if f.validation_status != "filtered"]
         result_data: dict[str, Any] = {
             "checker": r.checker_name,
             "model": r.model,
@@ -44,9 +43,13 @@ def format_json(report: Report) -> str:
                     "confidence": f.confidence,
                     "validation_status": f.validation_status,
                 }
-                for f in active_findings
+                for f in r.active_findings
             ],
         }
         data["results"].append(result_data)
 
-    return json.dumps(data, indent=2, ensure_ascii=False)
+    return data
+
+
+def format_json(report: Report) -> str:
+    return json.dumps(report_to_dict(report), indent=2, ensure_ascii=False)

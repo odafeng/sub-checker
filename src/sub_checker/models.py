@@ -81,6 +81,11 @@ class CheckerResult:
     cot_entries: list[dict] = field(default_factory=list)
     model: str = ""  # model that produced this result (for per-checker cost)
 
+    @property
+    def active_findings(self) -> list[Finding]:
+        """Findings that survived validation (everything except 'filtered')."""
+        return [f for f in self.findings if f.validation_status != "filtered"]
+
 
 @dataclass
 class Report:
