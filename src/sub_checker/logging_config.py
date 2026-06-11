@@ -54,7 +54,10 @@ def setup_logging(verbose: bool = False, log_dir: Path | None = None) -> None:
     error_handler.setLevel(logging.ERROR)
     error_handler.setFormatter(
         logging.Formatter(
-            "%(asctime)s | %(name)s | %(levelname)s | %(message)s\n%(exc_info)s",
+            # Formatter appends the formatted traceback automatically when
+            # exc_info is present — a literal %(exc_info)s would print the raw
+            # tuple (or "None") on every record.
+            "%(asctime)s | %(name)s | %(levelname)s | %(message)s",
             datefmt="%Y-%m-%d %H:%M:%S",
         )
     )
@@ -167,6 +170,6 @@ class AgentCOTLogger:
             "total_steps": len(self._entries),
         }
 
-        filepath.write_text(json.dumps(data, indent=2, ensure_ascii=False))
+        filepath.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
         self._logger.info("COT log saved: %s", filepath)
         return filepath

@@ -15,5 +15,9 @@ def load_dotenv() -> None:
                 if not line or line.startswith("#") or "=" not in line:
                     continue
                 key, _, value = line.partition("=")
-                os.environ.setdefault(key.strip(), value.strip())
+                # Strip optional surrounding quotes: KEY="value" / KEY='value'
+                value = value.strip()
+                if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+                    value = value[1:-1]
+                os.environ.setdefault(key.strip(), value)
             break

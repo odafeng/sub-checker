@@ -63,6 +63,22 @@ AgentCallback = Callable[[str, str, dict[str, Any]], Coroutine[Any, Any, None]]
 # callback(event_type, agent_name, data)
 
 
+async def _notify(
+    on_progress: AgentCallback | None, event: str, name: str, data: dict[str, Any]
+) -> None:
+    """Invoke the progress callback, never letting it break the pipeline.
+
+    A WebSocket that disconnects mid-run must not crash the run or discard
+    an agent's (already paid-for) results.
+    """
+    if on_progress is None:
+        return
+    try:
+        await on_progress(event, name, data)
+    except Exception as e:
+        logger.warning("Progress callback failed for %s/%s: %s", event, name, e)
+
+
 def create_agents(config: Config) -> list[BaseCheckerAgent]:
     """Create all checker agents."""
     from sub_checker.agents.citation_claim import CitationClaimAgent
@@ -109,30 +125,36 @@ async def run_agent_safe(
     on_progress: AgentCallback | None = None,
 ) -> CheckerResult:
     """Run a single agent with error handling. Never raises."""
-    if on_progress:
-        await on_progress("agent_start", agent.name, {})
+    await _notify(on_progress, "agent_start", agent.name, {})
     try:
         result = await agent.run(manuscript, config)
-        if on_progress:
-            await on_progress(
-                "agent_done",
-                agent.name,
-                {
-                    "findings_count": len(result.findings),
-                    "elapsed": round(result.elapsed_seconds, 1),
-                },
-            )
-        return result
     except Exception as e:
         logger.error("[%s] Agent crashed: %s", agent.name, e, exc_info=True)
-        if on_progress:
-            await on_progress("agent_error", agent.name, {"error": str(e)})
+        await _notify(on_progress, "agent_error", agent.name, {"error": str(e)})
         return CheckerResult(
             checker_name=agent.name,
             findings=[
-                Finding(checker=agent.name, severity=Severity.ERROR, message=f"Agent crashed: {e}")
+                Finding(
+                    checker=agent.name,
+                    severity=Severity.ERROR,
+                    message=f"Agent crashed: {e}",
+                    # Pre-confirmed: this is an operational notice, not a
+                    # manuscript claim — the reviewer must not filter it.
+                    validation_status="confirmed",
+                    validation_note="[harness] agent crash notice, not reviewed",
+                )
             ],
         )
+    await _notify(
+        on_progress,
+        "agent_done",
+        agent.name,
+        {
+            "findings_count": len(result.findings),
+            "elapsed": round(result.elapsed_seconds, 1),
+        },
+    )
+    return result
 
 
 def build_report(
@@ -195,8 +217,9 @@ async def run_all_phases(
     order = {name: i for i, name in enumerate(AGENT_ORDER)}
     scheduled = sorted(agents, key=lambda a: order.get(a.name, len(order)))
 
-    if on_progress:
-        await on_progress("phase_start", "", {"phase": 1, "agents": [a.name for a in scheduled]})
+    await _notify(
+        on_progress, "phase_start", "", {"phase": 1, "agents": [a.name for a in scheduled]}
+    )
 
     semaphore = asyncio.Semaphore(max(1, config.max_concurrent_agents))
 
@@ -207,9 +230,10 @@ async def run_all_phases(
     results: list[CheckerResult] = list(await asyncio.gather(*[run_limited(a) for a in scheduled]))
 
     # --- Phase 2: Deterministic post-validation ---
-    if on_progress:
-        await on_progress("phase_start", "", {"phase": 2, "agents": ["deterministic_check"]})
-        await on_progress("agent_start", "deterministic_check", {})
+    await _notify(
+        on_progress, "phase_start", "", {"phase": 2, "agents": ["deterministic_check"]}
+    )
+    await _notify(on_progress, "agent_start", "deterministic_check", {})
 
     total_before = sum(len(r.findings) for r in results)
     results = run_deterministic_checks(results, manuscript)
@@ -218,35 +242,33 @@ async def run_all_phases(
         "Deterministic post-validation: %d/%d findings filtered", filtered_det, total_before
     )
 
-    if on_progress:
-        await on_progress(
-            "agent_done", "deterministic_check", {"filtered": filtered_det, "elapsed": 0.0}
-        )
+    await _notify(
+        on_progress, "agent_done", "deterministic_check", {"filtered": filtered_det, "elapsed": 0.0}
+    )
 
     # --- Phase 3: Reviewer agent ---
     harness_usage = TokenUsage()
     remaining = total_before - filtered_det
     if remaining > 0:
-        if on_progress:
-            await on_progress("phase_start", "", {"phase": 3, "agents": ["reviewer"]})
-            await on_progress("agent_start", "reviewer", {})
+        await _notify(on_progress, "phase_start", "", {"phase": 3, "agents": ["reviewer"]})
+        await _notify(on_progress, "agent_start", "reviewer", {})
 
         results, harness_usage = await run_reviewer(
             manuscript, results, model=config.reviewer_model or config.model
         )
 
-        if on_progress:
-            confirmed = sum(
-                1 for r in results for f in r.findings if f.validation_status == "confirmed"
-            )
-            filtered_rev = (
-                sum(1 for r in results for f in r.findings if f.validation_status == "filtered")
-                - filtered_det
-            )
-            await on_progress(
-                "agent_done",
-                "reviewer",
-                {"confirmed": confirmed, "filtered": filtered_rev, "elapsed": 0.0},
-            )
+        confirmed = sum(
+            1 for r in results for f in r.findings if f.validation_status == "confirmed"
+        )
+        filtered_rev = (
+            sum(1 for r in results for f in r.findings if f.validation_status == "filtered")
+            - filtered_det
+        )
+        await _notify(
+            on_progress,
+            "agent_done",
+            "reviewer",
+            {"confirmed": confirmed, "filtered": filtered_rev, "elapsed": 0.0},
+        )
 
     return results, harness_usage

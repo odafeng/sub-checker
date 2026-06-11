@@ -40,16 +40,54 @@ _MONTHS = {
 }
 
 
-def _parse_claimed_date(claimed: str) -> datetime | None:
-    """Parse 'YYYY' or 'YYYY-MM' into a datetime (first day of period)."""
+def _parse_claimed_period(claimed: str) -> tuple[datetime, datetime] | None:
+    """Parse 'YYYY' or 'YYYY-MM' into a (start, next_period_start) pair.
+
+    A "future date" claim about a *period* (a year or a month) is only
+    provably wrong when the WHOLE period is in the past. Comparing the first
+    day of the period against today would wrongly kill true findings about
+    later parts of the current year/month.
+    """
     m = re.match(r"^\s*(\d{4})(?:-(\d{1,2}))?\s*$", claimed)
     if not m:
         return None
     year = int(m.group(1))
-    month = int(m.group(2)) if m.group(2) else 1
-    if not (1 <= month <= 12 and 1900 <= year <= 2200):
+    if not (1900 <= year <= 2200):
         return None
-    return datetime(year, month, 1, tzinfo=UTC)
+    if m.group(2):
+        month = int(m.group(2))
+        if not (1 <= month <= 12):
+            return None
+        start = datetime(year, month, 1, tzinfo=UTC)
+        nxt = datetime(year + 1, 1, 1, tzinfo=UTC) if month == 12 else (
+            datetime(year, month + 1, 1, tzinfo=UTC)
+        )
+    else:
+        start = datetime(year, 1, 1, tzinfo=UTC)
+        nxt = datetime(year + 1, 1, 1, tzinfo=UTC)
+    return start, nxt
+
+
+def _judge_period(
+    start: datetime, nxt: datetime, today: datetime, label: str
+) -> tuple[str, str] | None:
+    """Decide the action for a future-date claim about [start, nxt).
+
+    - Period fully elapsed → the claim is provably wrong → filter.
+    - Today inside the period → ambiguous (part of it is still future) →
+      downgrade and let the reviewer decide.
+    - Period entirely in the future → claim is plausible → no action.
+    """
+    today_str = today.strftime("%Y-%m-%d")
+    if nxt <= today:
+        return "filter", f"{label} is entirely in the past (today={today_str})"
+    if start <= today:
+        return (
+            "downgrade",
+            f"{label} is the current period (today={today_str}) — "
+            "partially future, needs reviewer confirmation",
+        )
+    return None
 
 
 def validate_date_claims(
@@ -65,16 +103,11 @@ def validate_date_claims(
     for i, f in enumerate(findings):
         # Structured path: the agent told us exactly which date it means
         if f.claim_type == "future_date" and f.claimed_date:
-            claimed = _parse_claimed_date(f.claimed_date)
-            if claimed and claimed <= today:
-                actions.append(
-                    (
-                        i,
-                        "filter",
-                        f"{f.claimed_date} is not in the future "
-                        f"(today={today.strftime('%Y-%m-%d')})",
-                    )
-                )
+            period = _parse_claimed_period(f.claimed_date)
+            if period:
+                judged = _judge_period(period[0], period[1], today, f.claimed_date)
+                if judged:
+                    actions.append((i, judged[0], judged[1]))
             continue
 
         # Fallback: parse the finding's prose
@@ -90,29 +123,28 @@ def validate_date_claims(
             year = int(future_match.group(2))
             month_name = future_match.group(1).split()[0]
             month = _MONTHS.get(month_name.lower(), 1)
-            claimed_date = datetime(year, month, 1, tzinfo=UTC)
-            if claimed_date <= today:
-                actions.append(
-                    (
-                        i,
-                        "filter",
-                        f"{future_match.group(1)} is in the past "
-                        f"(today={today.strftime('%Y-%m-%d')})",
-                    )
-                )
+            start = datetime(year, month, 1, tzinfo=UTC)
+            nxt = (
+                datetime(year + 1, 1, 1, tzinfo=UTC)
+                if month == 12
+                else datetime(year, month + 1, 1, tzinfo=UTC)
+            )
+            judged = _judge_period(start, nxt, today, future_match.group(1))
+            if judged:
+                actions.append((i, judged[0], judged[1]))
 
-        # Also check "YYYY 是未來" patterns
+        # Also check "YYYY 是未來" patterns (year-only — works for Chinese
+        # month phrasing like "2026年12月" too, where the English-month regex
+        # never matches)
         year_future = re.search(r"(\d{4})\s*.{0,15}(?:未來|future)", msg, re.IGNORECASE)
         if year_future and not future_match:
             year = int(year_future.group(1))
-            if year <= today.year:
-                actions.append(
-                    (
-                        i,
-                        "filter",
-                        f"Year {year} is not in the future (today={today.strftime('%Y-%m-%d')})",
-                    )
-                )
+            if 1900 <= year <= 2200:
+                start = datetime(year, 1, 1, tzinfo=UTC)
+                nxt = datetime(year + 1, 1, 1, tzinfo=UTC)
+                judged = _judge_period(start, nxt, today, f"Year {year}")
+                if judged:
+                    actions.append((i, judged[0], judged[1]))
 
     return actions
 
@@ -204,10 +236,11 @@ def validate_self_consistency(
             re.IGNORECASE,
         )
         if inconsistency_match:
-            # Check if all cited examples actually use the same pattern
+            # Check if all cited examples actually use the same pattern.
+            # Require >=2 DISTINCT underscore tokens — the same identifier
+            # repeated (message + suggestion) is one example, not two.
             underscores = re.findall(r"[A-Za-z]+_[A-Za-z]+", combined)
-            if len(underscores) >= 2:
-                # All examples use underscores → not actually inconsistent
+            if len(set(underscores)) >= 2:
                 actions.append(
                     (
                         i,

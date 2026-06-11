@@ -12,6 +12,7 @@ returned through a submit_verdicts tool call (with a text-JSON fallback).
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -20,7 +21,7 @@ from typing import Any
 
 import anthropic
 
-from sub_checker.agents.base import set_message_cache_breakpoint
+from sub_checker.agents.base import set_message_cache_breakpoint, supports_adaptive_thinking
 from sub_checker.models import CheckerResult, Finding, Manuscript, Severity, TokenUsage
 from sub_checker.tools.manuscript_tools import (
     TOOL_GET_REFERENCE_LIST,
@@ -38,6 +39,7 @@ logger = logging.getLogger("sub_checker.harness.reviewer")
 _BATCH_SIZE = 25
 _MAX_TOKENS = 8192
 _MAX_ITERATIONS = 12  # tool-use rounds per batch before forcing a verdict
+_MAX_CONCURRENT_BATCHES = 3  # batches reviewed in parallel after the first
 _MANUSCRIPT_PREVIEW_CHARS = 4000
 
 _SUBMIT_VERDICTS_TOOL = {
@@ -203,6 +205,10 @@ async def _review_batch(
 
     verdicts: list[dict[str, Any]] = []
 
+    extra: dict[str, Any] = {}
+    if supports_adaptive_thinking(model):
+        extra["thinking"] = {"type": "adaptive"}
+
     for iteration in range(1, _MAX_ITERATIONS + 1):
         set_message_cache_breakpoint(messages)  # type: ignore[arg-type]
         response = await client.messages.create(
@@ -211,6 +217,7 @@ async def _review_batch(
             system=system_blocks,  # type: ignore[arg-type]
             tools=tools,
             messages=messages,  # type: ignore[arg-type]
+            **extra,
         )
 
         usage.input_tokens += response.usage.input_tokens
@@ -277,9 +284,14 @@ async def run_reviewer(
     """
     usage = TokenUsage()
 
-    # Collect non-filtered findings, indexed globally
+    # Collect findings that still need review: unvalidated ones and those
+    # downgraded by deterministic heuristics. Pre-confirmed findings (e.g.
+    # harness crash/incomplete notices) and filtered ones are skipped.
     findings: list[Finding] = [
-        f for result in results for f in result.findings if f.validation_status != "filtered"
+        f
+        for result in results
+        for f in result.findings
+        if f.validation_status in ("", "downgraded")
     ]
 
     if not findings:
@@ -289,29 +301,26 @@ async def run_reviewer(
     logger.info("Reviewer agent reviewing %d findings with %s...", len(findings), model)
     start = time.monotonic()
 
-    client = anthropic.AsyncAnthropic()
     context = _manuscript_context(manuscript)
 
-    confirmed = 0
-    filtered = 0
-    downgraded = 0
-
-    for batch_start in range(0, len(findings), _BATCH_SIZE):
-        batch = [
-            (batch_start + j, f)
-            for j, f in enumerate(findings[batch_start : batch_start + _BATCH_SIZE])
-        ]
-
+    async def process_batch(
+        client: anthropic.AsyncAnthropic,
+        batch_start: int,
+        batch: list[tuple[int, Finding]],
+    ) -> tuple[int, int, int]:
+        """Review one batch and apply its verdicts. Returns counts."""
         try:
             verdicts = await _review_batch(client, model, manuscript, context, batch, usage)
         except Exception as e:
             logger.error("Reviewer agent failed on batch %d: %s", batch_start, e)
-            continue  # leave this batch's findings as-is, don't block output
+            return (0, 0, 0)  # leave this batch's findings as-is
 
         if not verdicts:
             logger.warning("Reviewer returned no verdicts for batch %d", batch_start)
-            continue
+            return (0, 0, 0)
 
+        confirmed = downgraded = filtered = 0
+        batch_end = batch_start + len(batch)
         for verdict in verdicts:
             if not isinstance(verdict, dict):
                 continue
@@ -320,7 +329,16 @@ async def run_reviewer(
             confidence = verdict.get("confidence", 0.5)
             reason = verdict.get("reason", "")
 
-            if not isinstance(idx, int) or idx < 0 or idx >= len(findings):
+            # Strict bounds: a verdict may only touch THIS batch's findings.
+            # A model returning batch-local indices (0..N) for a later batch
+            # must not silently overwrite earlier batches' verdicts.
+            if not isinstance(idx, int) or not (batch_start <= idx < batch_end):
+                logger.warning(
+                    "Reviewer verdict index %r outside batch [%d, %d) — skipped",
+                    idx,
+                    batch_start,
+                    batch_end,
+                )
                 continue
 
             finding = findings[idx]
@@ -348,6 +366,35 @@ async def run_reviewer(
                     finding.severity = finding.original_severity
                     finding.original_severity = None
                 confirmed += 1
+        return (confirmed, downgraded, filtered)
+
+    batches = [
+        (
+            batch_start,
+            [
+                (batch_start + j, f)
+                for j, f in enumerate(findings[batch_start : batch_start + _BATCH_SIZE])
+            ],
+        )
+        for batch_start in range(0, len(findings), _BATCH_SIZE)
+    ]
+
+    async with anthropic.AsyncAnthropic() as client:
+        # First batch alone to warm the system+tools prompt cache, then the
+        # remaining batches concurrently (each is an independent conversation).
+        totals = [await process_batch(client, *batches[0])]
+        if len(batches) > 1:
+            sem = asyncio.Semaphore(_MAX_CONCURRENT_BATCHES)
+
+            async def bounded(bs: int, b: list[tuple[int, Finding]]) -> tuple[int, int, int]:
+                async with sem:
+                    return await process_batch(client, bs, b)
+
+            totals.extend(await asyncio.gather(*(bounded(bs, b) for bs, b in batches[1:])))
+
+    confirmed = sum(t[0] for t in totals)
+    downgraded = sum(t[1] for t in totals)
+    filtered = sum(t[2] for t in totals)
 
     elapsed = time.monotonic() - start
     logger.info(

@@ -44,7 +44,7 @@ def test_date_claim_structured_past_date_filtered():
         claimed_date="2025-11",
     )
     actions = validate_date_claims([f], today=TODAY)
-    assert actions == [(0, "filter", "2025-11 is not in the future (today=2026-06-10)")]
+    assert actions == [(0, "filter", "2025-11 is entirely in the past (today=2026-06-10)")]
 
 
 def test_date_claim_structured_future_date_kept():
@@ -54,6 +54,47 @@ def test_date_claim_structured_future_date_kept():
         claimed_date="2027-01",
     )
     assert validate_date_claims([f], today=TODAY) == []
+
+
+def test_date_claim_current_year_downgraded_not_filtered():
+    # "2026" with today=2026-06-10: December 2026 is still in the future, so a
+    # year-granular claim must NOT be hard-filtered — only downgraded.
+    f = _finding(
+        message="The date is in the future",
+        claim_type="future_date",
+        claimed_date="2026",
+    )
+    actions = validate_date_claims([f], today=TODAY)
+    assert len(actions) == 1
+    assert actions[0][1] == "downgrade"
+
+
+def test_date_claim_current_month_downgraded_not_filtered():
+    f = _finding(
+        message="The date is in the future",
+        claim_type="future_date",
+        claimed_date="2026-06",
+    )
+    actions = validate_date_claims([f], today=TODAY)
+    assert len(actions) == 1
+    assert actions[0][1] == "downgrade"
+
+
+def test_date_claim_future_month_of_current_year_kept():
+    f = _finding(
+        message="The date is in the future",
+        claim_type="future_date",
+        claimed_date="2026-12",
+    )
+    assert validate_date_claims([f], today=TODAY) == []
+
+
+def test_date_claim_chinese_prose_current_year_not_filtered():
+    # "2026年12月 是未來日期" — the English-month regex can't match, the
+    # year-only fallback sees 2026; it must not hard-filter a true finding.
+    f = _finding(message="2026年12月 是未來日期")
+    actions = validate_date_claims([f], today=TODAY)
+    assert all(a[1] != "filter" for a in actions)
 
 
 def test_date_claim_prose_fallback_still_works():
@@ -204,6 +245,8 @@ async def test_reviewer_api_failure_leaves_findings_untouched():
 
     mock_client = MagicMock()
     mock_client.messages.create = AsyncMock(side_effect=RuntimeError("API down"))
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
     with patch("sub_checker.harness.reviewer.anthropic.AsyncAnthropic", return_value=mock_client):
         results, usage = await run_reviewer(_manuscript(), results)
 

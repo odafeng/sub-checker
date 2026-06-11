@@ -270,8 +270,17 @@ def main(
         console.print(f"[red]No cases with golden.yaml found in {root}[/red]")
         raise SystemExit(2)
 
-    cfg_path = Path(config_path) if config_path else Path(".sub-checker.yaml")
-    base_config = load_config(cfg_path if cfg_path.exists() else None)
+    # An explicitly passed --config that doesn't exist is an error — silently
+    # running the whole (expensive) eval suite on defaults would be worse.
+    if config_path:
+        cfg_path = Path(config_path)
+        if not cfg_path.exists():
+            console.print(f"[red]Config file not found: {cfg_path}[/red]")
+            raise SystemExit(2)
+        base_config = load_config(cfg_path)
+    else:
+        default_cfg = Path(".sub-checker.yaml")
+        base_config = load_config(default_cfg if default_cfg.exists() else None)
 
     async def run_all() -> list[CaseOutcome]:
         outcomes = []

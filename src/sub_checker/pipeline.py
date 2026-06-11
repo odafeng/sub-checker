@@ -20,6 +20,7 @@ async def run_pipeline(
     verbose: bool = False,
     skip: set[str] | None = None,
     only: set[str] | None = None,
+    manuscript_path: str = "",
 ) -> Report:
     """Run all checker agents with Rich progress display."""
     console = Console()
@@ -30,7 +31,7 @@ async def run_pipeline(
         from datetime import UTC, datetime
 
         return Report(
-            manuscript_path=str(manuscript.figure_dir or ""),
+            manuscript_path=manuscript_path,
             timestamp=datetime.now(UTC),
             target_journal=config.journal,
         )
@@ -46,6 +47,9 @@ async def run_pipeline(
     async def on_progress(event: str, agent_name: str, data: dict[str, Any]) -> None:
         nonlocal current_task
         if event == "phase_start":
+            if current_task is not None:
+                progress.update(current_task, completed=True)
+                progress.stop_task(current_task)
             names = ", ".join(data.get("agents", []))
             current_task = progress.add_task(f"Phase {data.get('phase')}: {names}", total=None)
         elif event == "agent_done" and verbose:
@@ -61,7 +65,7 @@ async def run_pipeline(
 
     return build_report(
         results,
-        manuscript_path=str(manuscript.figure_dir or ""),
+        manuscript_path=manuscript_path,
         journal=config.journal,
         model=config.model,
         harness_usage=harness_usage,

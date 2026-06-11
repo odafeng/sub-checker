@@ -41,7 +41,7 @@ def _resolve_names(names: str | None) -> set[str] | None:
 
 
 @click.command()
-@click.argument("manuscript_path", type=click.Path(exists=True))
+@click.argument("manuscript_path", type=click.Path(exists=True), required=False)
 @click.option("-j", "--journal", default=None, help="Target journal name")
 @click.option(
     "-c", "--config", "config_path", default=None, type=click.Path(), help="Config file path"
@@ -68,7 +68,7 @@ def _resolve_names(names: str | None) -> set[str] | None:
     help="Report language (en or zh-TW)",
 )
 def main(
-    manuscript_path: str,
+    manuscript_path: str | None,
     journal: str | None,
     config_path: str | None,
     output_format: str,
@@ -89,13 +89,23 @@ def main(
 
     if do_init:
         init_path = Path(".sub-checker.yaml")
-        init_path.write_text(DEFAULT_CONFIG_YAML)
+        init_path.write_text(DEFAULT_CONFIG_YAML, encoding="utf-8")
         console.print(f"[green]Created {init_path}[/green]")
         return
 
-    # Load config
-    cfg_path = Path(config_path) if config_path else Path(".sub-checker.yaml")
-    config = load_config(cfg_path if cfg_path.exists() else None)
+    if manuscript_path is None:
+        raise click.UsageError("Missing argument 'MANUSCRIPT_PATH' (or use --init).")
+
+    # Load config. An explicitly passed --config that doesn't exist is an
+    # error — silently running on defaults would waste an expensive run.
+    if config_path:
+        cfg_path = Path(config_path)
+        if not cfg_path.exists():
+            raise click.UsageError(f"Config file not found: {cfg_path}")
+    else:
+        default_cfg = Path(".sub-checker.yaml")
+        cfg_path = default_cfg if default_cfg.exists() else None
+    config = load_config(cfg_path)
     if journal:
         config.journal = journal
     config.output_lang = lang
@@ -146,6 +156,7 @@ def main(
             verbose=verbose,
             skip=_resolve_names(skip),
             only=_resolve_names(only),
+            manuscript_path=str(docx_path),
         )
     )
 
@@ -159,7 +170,7 @@ def main(
 
         text = format_json(report)
         if output_file:
-            Path(output_file).write_text(text)
+            Path(output_file).write_text(text, encoding="utf-8")
         else:
             console.print(text)
     elif output_format == "markdown":
@@ -167,7 +178,7 @@ def main(
 
         text = format_markdown(report, lang=lang)
         if output_file:
-            Path(output_file).write_text(text)
+            Path(output_file).write_text(text, encoding="utf-8")
         else:
             console.print(text)
     elif output_format == "html":
@@ -175,7 +186,7 @@ def main(
 
         text = format_html(report, lang=lang)
         out = Path(output_file) if output_file else Path("sub-check-report.html")
-        out.write_text(text)
+        out.write_text(text, encoding="utf-8")
         console.print(f"[green]HTML report saved to {out}[/green]")
 
     # Exit code based on errors
