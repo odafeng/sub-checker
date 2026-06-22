@@ -1,0 +1,43 @@
+# sub-checker configuration
+
+# Target journal (can also be set via --journal CLI flag)
+# journal: "The Lancet"
+
+# Default language
+language: "en-US"
+
+# Default model for judgment-heavy agents (logic, citation_claim,
+# journal_guidelines) and the reviewer
+model: "claude-opus-4-8"
+
+# Per-checker model overrides. Mechanical checks run fine (and ~5x cheaper)
+# on Sonnet; set to {} to run everything on `model`.
+models:
+  typo_grammar: "claude-sonnet-4-6"
+  figure_table: "claude-sonnet-4-6"
+  citation_exist: "claude-sonnet-4-6"
+  citation_format: "claude-sonnet-4-6"
+
+# Model for the post-validation reviewer agent (null → use `model`)
+reviewer_model: null
+
+# How many checker agents may run concurrently
+max_concurrent_agents: 3
+
+# Figure/Table checker
+figures:
+  dir: "figures/"
+  pattern: "Figure{n}.png"
+  case_sensitive: false
+
+# Citation-claim verification
+claim:
+  enabled: true
+  model: "claude-opus-4-8"
+  pubmed_email: "odafeng@hotmail.com"
+  pubmed_api_key: "25cf0f039c94af6744a9b6facd5a9c083109"
+  max_concurrent_pubmed: 3
+  max_concurrent_llm: 5
+
+# Custom dictionary (words to ignore in typo check)
+custom_dictionary: []
