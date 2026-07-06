@@ -7,16 +7,15 @@ from typing import Any
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
-from sub_checker.agents.base import BaseCheckerAgent
 from sub_checker.config import Config
 from sub_checker.models import Manuscript, Report
-from sub_checker.orchestrator import build_report, filter_agents, run_all_phases
+from sub_checker.orchestrator import Checker, build_report, filter_agents, run_all_phases
 
 
 async def run_pipeline(
     manuscript: Manuscript,
     config: Config,
-    agents: list[BaseCheckerAgent],
+    agents: list[Checker],
     verbose: bool = False,
     skip: set[str] | None = None,
     only: set[str] | None = None,

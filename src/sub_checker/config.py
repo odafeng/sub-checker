@@ -10,6 +10,7 @@ class FigureConfig(BaseModel):
     dir: str = "figures/"
     pattern: str = "Figure{n}.png"
     case_sensitive: bool = False
+    vision_enabled: bool = True  # run the vision figure-vs-legend check
 
 
 class ClaimConfig(BaseModel):
@@ -96,6 +97,7 @@ figures:
   dir: "figures/"
   pattern: "Figure{n}.png"
   case_sensitive: false
+  vision_enabled: true
 
 # Citation-claim verification. This checker is the most expensive (it runs a
 # multi-source PubMed/Semantic Scholar/Crossref pre-pass and uses the global

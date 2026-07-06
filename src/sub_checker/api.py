@@ -82,6 +82,7 @@ ALL_CHECKERS = [
     {"name": "journal_guidelines", "label_en": "Journal Guidelines", "label_zh": "期刊投稿規範"},
     {"name": "logic", "label_en": "Logic Consistency", "label_zh": "邏輯一致性"},
     {"name": "citation_claim", "label_en": "Citation-Claim", "label_zh": "引用-主張驗證"},
+    {"name": "figure_vision", "label_en": "Figure Vision", "label_zh": "圖像內容檢查"},
 ]
 
 

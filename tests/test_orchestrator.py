@@ -23,6 +23,18 @@ def test_create_agents_honors_claim_disabled():
     assert off == on - {"citation_claim"}
 
 
+def test_create_agents_includes_figure_vision_by_default():
+    names = [a.name for a in create_agents(Config())]
+    assert "figure_vision" in names
+
+
+def test_create_agents_omits_figure_vision_when_disabled():
+    cfg = Config()
+    cfg.figures.vision_enabled = False
+    names = [a.name for a in create_agents(cfg)]
+    assert "figure_vision" not in names
+
+
 # --- cost model ---
 
 
