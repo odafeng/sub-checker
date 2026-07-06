@@ -38,6 +38,7 @@ LOCALES: dict[str, dict[str, str]] = {
         "checker_journal_guidelines": "Journal Guidelines",
         "checker_logic": "Logic Consistency",
         "checker_citation_claim": "Citation-Claim Verification",
+        "checker_figure_vision": "Figure Vision",
     },
     "zh-TW": {
         # Report header
@@ -72,6 +73,7 @@ LOCALES: dict[str, dict[str, str]] = {
         "checker_journal_guidelines": "期刊投稿規範",
         "checker_logic": "邏輯一致性",
         "checker_citation_claim": "引用-主張驗證",
+        "checker_figure_vision": "圖像內容檢查",
     },
 }
 

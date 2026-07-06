@@ -9,13 +9,27 @@ import asyncio
 import logging
 from collections.abc import Callable, Coroutine
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Protocol
 
-from sub_checker.agents.base import BaseCheckerAgent
 from sub_checker.config import Config
 from sub_checker.models import CheckerResult, Finding, Manuscript, Report, Severity, TokenUsage
 
 logger = logging.getLogger("sub_checker.orchestrator")
+
+
+class Checker(Protocol):
+    """Structural type for anything the orchestrator can run as a checker.
+
+    Both the agentic BaseCheckerAgent subclasses and the non-agentic
+    FigureVisionChecker satisfy this — they need only a name, a model, and an
+    async run() returning a CheckerResult.
+    """
+
+    name: str
+    model: str
+
+    async def run(self, manuscript: Manuscript, config: Config) -> CheckerResult: ...
+
 
 # (input, output) USD per million tokens, matched by substring of the model name.
 # Cache writes cost 1.25x input; cache reads cost 0.1x input.
@@ -79,7 +93,7 @@ async def _notify(
         logger.warning("Progress callback failed for %s/%s: %s", event, name, e)
 
 
-def create_agents(config: Config) -> list[BaseCheckerAgent]:
+def create_agents(config: Config) -> list[Checker]:
     """Create all checker agents."""
     from sub_checker.agents.citation_claim import CitationClaimAgent
     from sub_checker.agents.citation_exist import CitationExistAgent
@@ -102,14 +116,22 @@ def create_agents(config: Config) -> list[BaseCheckerAgent]:
     # Opus). `claim.enabled: false` in the config opts out of it entirely.
     if not config.claim.enabled:
         classes = [c for c in classes if c is not CitationClaimAgent]
-    return [cls(model=config.model_for(cls.name)) for cls in classes]
+    agents: list[Checker] = [cls(model=config.model_for(cls.name)) for cls in classes]
+    # Non-agentic vision checker: compares figure images to their legends. It
+    # no-ops at runtime when there is no figures directory, so creating it
+    # unconditionally (subject to the config toggle) is safe.
+    if config.figures.vision_enabled:
+        from sub_checker.vision.figure_review import FigureVisionChecker
+
+        agents.append(FigureVisionChecker(model=config.model_for("figure_vision")))
+    return agents
 
 
 def filter_agents(
-    agents: list[BaseCheckerAgent],
+    agents: list[Checker],
     only: set[str] | None = None,
     skip: set[str] | None = None,
-) -> list[BaseCheckerAgent]:
+) -> list[Checker]:
     """Filter agents by --only / --skip."""
     skip = skip or set()
     result = []
@@ -123,7 +145,7 @@ def filter_agents(
 
 
 async def run_agent_safe(
-    agent: BaseCheckerAgent,
+    agent: Checker,
     manuscript: Manuscript,
     config: Config,
     on_progress: AgentCallback | None = None,
@@ -197,7 +219,7 @@ def build_report(
 
 
 async def run_all_phases(
-    agents: list[BaseCheckerAgent],
+    agents: list[Checker],
     manuscript: Manuscript,
     config: Config,
     on_progress: AgentCallback | None = None,
@@ -228,7 +250,7 @@ async def run_all_phases(
 
     semaphore = asyncio.Semaphore(max(1, config.max_concurrent_agents))
 
-    async def run_limited(agent: BaseCheckerAgent) -> CheckerResult:
+    async def run_limited(agent: Checker) -> CheckerResult:
         async with semaphore:
             return await run_agent_safe(agent, manuscript, config, on_progress)
 

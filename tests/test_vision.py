@@ -75,9 +75,7 @@ def test_extract_figure_legend_absent_returns_empty():
 
 def _ms_with_fig(tmp_path: Path, legend: str) -> Manuscript:
     (tmp_path / "Figure1.png").write_bytes(b"\x89PNG fake")
-    return Manuscript(
-        title="T", sections=[], paragraphs=[], raw_text=legend, figure_dir=tmp_path
-    )
+    return Manuscript(title="T", sections=[], paragraphs=[], raw_text=legend, figure_dir=tmp_path)
 
 
 async def test_figure_vision_reports_mismatch(tmp_path: Path):
