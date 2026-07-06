@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from sub_checker.vision.figure_review import extract_figure_legend
 from sub_checker.vision.image_loader import TIFF_NEEDS_PILLOW, load_image_block
 
 
@@ -50,3 +51,18 @@ def test_load_tiff_with_pillow_converts_to_png(tmp_path: Path):
     block = load_image_block(p)
     assert isinstance(block, dict)
     assert block["source"]["media_type"] == "image/png"
+
+
+def test_extract_figure_legend_picks_legend_block():
+    text = (
+        "As shown in Figure 2, the mass is large.\n\n"
+        "Figure 2. CT of the pelvis showing a 3 cm rectal tumour (arrow).\n\n"
+        "Figure 3. Kaplan-Meier survival curve."
+    )
+    legend = extract_figure_legend(text, 2)
+    assert "CT of the pelvis" in legend
+    assert "Kaplan-Meier" not in legend
+
+
+def test_extract_figure_legend_absent_returns_empty():
+    assert extract_figure_legend("No figures mentioned here.", 1) == ""
