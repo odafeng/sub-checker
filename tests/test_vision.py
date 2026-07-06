@@ -8,8 +8,13 @@ from pathlib import Path
 
 import pytest
 
-from sub_checker.vision.figure_review import extract_figure_legend
+from sub_checker.config import Config
+from sub_checker.models import Manuscript
+from sub_checker.vision.figure_review import FigureVisionChecker, extract_figure_legend
 from sub_checker.vision.image_loader import TIFF_NEEDS_PILLOW, load_image_block
+from tests.mock_helpers import MockResponse, MockToolUse, mock_anthropic_client
+
+_VISION_TARGET = "sub_checker.vision.figure_review.anthropic.AsyncAnthropic"
 
 
 def test_load_png_returns_native_block(tmp_path: Path):
@@ -66,3 +71,65 @@ def test_extract_figure_legend_picks_legend_block():
 
 def test_extract_figure_legend_absent_returns_empty():
     assert extract_figure_legend("No figures mentioned here.", 1) == ""
+
+
+def _ms_with_fig(tmp_path: Path, legend: str) -> Manuscript:
+    (tmp_path / "Figure1.png").write_bytes(b"\x89PNG fake")
+    return Manuscript(
+        title="T", sections=[], paragraphs=[], raw_text=legend, figure_dir=tmp_path
+    )
+
+
+async def test_figure_vision_reports_mismatch(tmp_path: Path):
+    ms = _ms_with_fig(tmp_path, "Figure 1. CT of the pelvis.")
+    resp = MockResponse(
+        content=[
+            MockToolUse(
+                name="report_figure_findings",
+                input={
+                    "findings": [
+                        {
+                            "issue_type": "content_mismatch",
+                            "severity": "warning",
+                            "message": "Legend says CT but the image is an MRI.",
+                            "suggestion": "Correct the modality.",
+                            "confidence": 0.9,
+                        }
+                    ]
+                },
+            )
+        ],
+        stop_reason="tool_use",
+    )
+    with mock_anthropic_client(resp, target=_VISION_TARGET):
+        result = await FigureVisionChecker().run(ms, Config(cot_dir="disabled"))
+
+    assert len(result.findings) == 1
+    f = result.findings[0]
+    assert f.checker == "figure_vision"
+    assert f.validation_status == "confirmed"
+    assert "MRI" in f.message
+    assert "Figure 1" in (f.location or "")
+
+
+async def test_figure_vision_no_figures_makes_no_api_call():
+    ms = Manuscript(title="T", sections=[], paragraphs=[], raw_text="x", figure_dir=None)
+    # No mock installed: any real API call would raise. It must not call.
+    result = await FigureVisionChecker().run(ms, Config(cot_dir="disabled"))
+    assert result.findings == []
+    assert result.checker_name == "figure_vision"
+
+
+async def test_figure_vision_disabled_makes_no_api_call(tmp_path: Path):
+    ms = _ms_with_fig(tmp_path, "Figure 1. CT of the pelvis.")
+    cfg = Config(cot_dir="disabled")
+    cfg.figures.vision_enabled = False
+    result = await FigureVisionChecker().run(ms, cfg)
+    assert result.findings == []
+
+
+async def test_figure_vision_skips_figure_without_legend(tmp_path: Path):
+    # Figure file exists but no matching legend in text -> skip, no API call.
+    ms = _ms_with_fig(tmp_path, "This manuscript mentions no figure legends.")
+    result = await FigureVisionChecker().run(ms, Config(cot_dir="disabled"))
+    assert result.findings == []
