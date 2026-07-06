@@ -78,10 +78,17 @@ def _table_row_texts(table: Table) -> list[str]:
     rows = []
     for row in table.rows:
         cells: list[str] = []
+        prev_tc = None
         for cell in row.cells:
+            # A horizontally-merged cell exposes the SAME underlying <w:tc>
+            # element at each grid position, so collapse by element identity.
+            # Comparing cell TEXT instead would also drop legitimately repeated
+            # values in non-merged cells (e.g. a "Arm A | 10 | 10" data row).
+            if cell._tc is prev_tc:
+                continue
+            prev_tc = cell._tc
             ct = " ".join(cell.text.split())
-            # Merged cells repeat the same object — skip consecutive dups
-            if ct and (not cells or cells[-1] != ct):
+            if ct:
                 cells.append(ct)
         if cells:
             rows.append(" | ".join(cells))

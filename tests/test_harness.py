@@ -9,6 +9,7 @@ from sub_checker.harness.deterministic import (
     run_deterministic_checks,
     validate_citation_numbers,
     validate_date_claims,
+    validate_self_consistency,
 )
 from sub_checker.harness.reviewer import run_reviewer
 from sub_checker.models import CheckerResult, Finding, Manuscript, Severity
@@ -97,11 +98,28 @@ def test_date_claim_chinese_prose_current_year_not_filtered():
     assert all(a[1] != "filter" for a in actions)
 
 
-def test_date_claim_prose_fallback_still_works():
+def test_date_claim_prose_fallback_downgrades_not_filters():
+    # A prose future-date claim WITHOUT structured fields is a heuristic match
+    # (proximity of a date to "future"), so it may only be downgraded — the
+    # reviewer confirms it. Hard-filtering here can silently delete real
+    # findings (see test below), which the module's fail-safe rule forbids.
     f = _finding(message="November 2025 is a future date")
     actions = validate_date_claims([f], today=TODAY)
     assert len(actions) == 1
-    assert actions[0][1] == "filter"
+    assert actions[0][1] == "downgrade"
+
+
+def test_date_claim_prose_past_date_near_future_word_not_filtered():
+    # Regression: a finding that merely MENTIONS a past date near "future" is
+    # not a future-date claim and must never be hard-deleted.
+    for msg in (
+        "Results from 2018 will inform future guidelines.",
+        "The Methods describe March 2020 enrollment, but future work is discussed.",
+        "2019年的資料將用於未來的分析。",
+    ):
+        f = _finding(message=msg)
+        actions = validate_date_claims([f], today=TODAY)
+        assert all(a[1] != "filter" for a in actions), f"wrongly filtered: {msg!r}"
 
 
 # --- validate_citation_numbers ---
@@ -130,6 +148,56 @@ def test_missing_reference_only_downgraded_not_filtered():
     actions = validate_citation_numbers([f], ms)
     assert len(actions) == 1
     assert actions[0][1] == "downgrade"
+
+
+def test_uncited_reference_paren_only_downgraded_not_filtered():
+    # "(1) ... (2) ..." are inline enumerations, not citations. A genuinely
+    # uncited reference [1] must NOT be hard-filtered just because "(1)" appears
+    # as an enumeration marker — that would silently delete a real finding.
+    ms = _manuscript(raw_text="Aims: (1) assess safety, (2) evaluate efficacy, (3) measure cost.")
+    f = _finding(
+        message="Reference 1 is never cited",
+        claim_type="uncited_reference",
+        ref_number=1,
+    )
+    actions = validate_citation_numbers([f], ms)
+    assert len(actions) == 1
+    assert actions[0][1] == "downgrade"
+
+
+def test_uncited_reference_square_bracket_is_exact_and_filtered():
+    # A square-bracket citation is unambiguous, so the "never cited" claim is
+    # provably wrong and may be filtered.
+    ms = _manuscript(raw_text="As shown [3], the effect holds.")
+    f = _finding(message="Reference 3 is never cited", claim_type="uncited_reference", ref_number=3)
+    actions = validate_citation_numbers([f], ms)
+    assert len(actions) == 1
+    assert actions[0][1] == "filter"
+
+
+# --- validate_self_consistency ---
+
+
+def test_self_consistency_downgrades_when_examples_share_pattern():
+    f = _finding(
+        message="Inconsistent naming: field_name is snake_case",
+        suggestion="But other_field also uses underscores",
+        claim_type="inconsistency",
+    )
+    actions = validate_self_consistency([f])
+    assert len(actions) == 1
+    assert actions[0][1] == "downgrade"
+
+
+def test_self_consistency_ignores_single_repeated_token():
+    # The same identifier repeated across message+suggestion is ONE example,
+    # not a genuine inconsistency, so no action is taken.
+    f = _finding(
+        message="Inconsistent: field_name should be camelCase",
+        suggestion="Rename field_name to fieldName",
+        claim_type="inconsistency",
+    )
+    assert validate_self_consistency([f]) == []
 
 
 def test_structured_fields_used_even_with_unparseable_prose():
@@ -235,6 +303,39 @@ async def test_reviewer_uses_tools_then_submits_verdicts():
     out = results[0].findings[0]
     assert out.validation_status == "filtered"
     assert out.confidence <= 0.1
+
+
+async def test_reviewer_multi_batch_rejects_cross_batch_index(monkeypatch):
+    # >25 findings span two batches. Each batch's verdicts must be applied by
+    # GLOBAL index, and a verdict whose index falls outside the emitting batch
+    # (a model returning batch-local indices) must be rejected, not silently
+    # overwrite another batch's finding (reviewer.py bounds guard).
+    import sub_checker.harness.reviewer as rev
+
+    findings = [_finding(message=f"issue {n}") for n in range(30)]
+    results = [CheckerResult(checker_name="t", findings=findings)]
+
+    async def fake_review_batch(_client, _model, _manuscript, _context, batch, _usage):
+        verdicts = [
+            {"index": gidx, "action": "confirm", "confidence": 0.9, "reason": "ok"}
+            for gidx, _ in batch
+        ]
+        # The second batch (global indices 25..29) also emits a verdict for
+        # index 0 — which belongs to batch 1 — to prove it gets rejected.
+        if batch[0][0] == 25:
+            verdicts.append(
+                {"index": 0, "action": "filter", "confidence": 0.0, "reason": "cross-batch leak"}
+            )
+        return verdicts
+
+    monkeypatch.setattr(rev, "_review_batch", fake_review_batch)
+    out, _ = await run_reviewer(_manuscript(raw_text="text"), results)
+
+    fs = out[0].findings
+    # All 30 confirmed via their own global index (batch 2 included)...
+    assert all(f.validation_status == "confirmed" for f in fs)
+    # ...and finding[0] was NOT flipped to "filtered" by batch 2's stray index.
+    assert fs[0].validation_status == "confirmed"
 
 
 async def test_reviewer_api_failure_leaves_findings_untouched():

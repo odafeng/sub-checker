@@ -44,6 +44,35 @@ async def test_citation_exist_finds_missing_reference(sample_manuscript: Manuscr
     assert len(result.findings) == 1
 
 
+def _ms(body_text: str, reference_section: str | None) -> Manuscript:
+    return Manuscript(
+        title="T",
+        sections=[],
+        paragraphs=[],
+        raw_text=body_text,
+        body_text=body_text,
+        reference_section=reference_section,
+    )
+
+
+def test_prescan_flags_dangling_and_uncited_numbers():
+    # [7] is cited but only 3 references exist → dangling; refs 2,3 exist but
+    # are never cited → possibly uncited. The pre-scan message must surface both.
+    ms = _ms("We cite [1] and [7].", reference_section="1. A.\n2. B.\n3. C.")
+    msg = CitationExistAgent()._build_initial_message(ms, Config(cot_dir="disabled"))
+    assert "NOT in the reference list" in msg
+    assert "[7]" in msg
+    assert "possibly NOT cited" in msg
+
+
+def test_prescan_no_phantom_dangling_when_refs_absent():
+    # With no reference list, ref_nums is empty and the guard must suppress the
+    # "dangling citation" line rather than flag every cited number as dangling.
+    ms = _ms("We cite [1].", reference_section=None)
+    msg = CitationExistAgent()._build_initial_message(ms, Config(cot_dir="disabled"))
+    assert "NOT in the reference list" not in msg
+
+
 @pytest.mark.asyncio
 async def test_citation_exist_all_match(sample_manuscript: Manuscript):
     """No findings when all citations match references."""

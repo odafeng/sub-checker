@@ -98,6 +98,10 @@ def create_agents(config: Config) -> list[BaseCheckerAgent]:
         LogicAgent,
         CitationClaimAgent,
     ]
+    # The citation-claim checker is expensive (multi-source API pre-pass +
+    # Opus). `claim.enabled: false` in the config opts out of it entirely.
+    if not config.claim.enabled:
+        classes = [c for c in classes if c is not CitationClaimAgent]
     return [cls(model=config.model_for(cls.name)) for cls in classes]
 
 
