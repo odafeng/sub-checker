@@ -181,3 +181,42 @@ def test_table_merged_cells_collapsed(tmp_path: Path):
     ms = parse_docx(path, None)
     assert "Header | Spanning" in ms.raw_text
     assert "Spanning | Spanning" not in ms.raw_text
+
+
+def test_superscript_citations_collected_from_body(tmp_path: Path):
+    import docx
+
+    doc = docx.Document()
+    doc.add_heading("Introduction", level=1)
+    p = doc.add_paragraph()
+    p.add_run("The effect was robust")
+    sup = p.add_run("15,16")
+    sup.font.superscript = True
+    p.add_run(" across cohorts.")
+    path = tmp_path / "sup.docx"
+    doc.save(str(path))
+
+    ms = parse_docx(path, None)
+    assert ms.superscript_citations == {15, 16}
+    # raw_text stays faithful — no synthetic brackets
+    assert "robust15,16" in ms.raw_text
+    assert "[15,16]" not in ms.raw_text
+
+
+def test_superscript_affiliation_markers_not_collected(tmp_path: Path):
+    # Superscript numbers in the header (author affiliation markers) must NOT
+    # be treated as citations.
+    import docx
+
+    doc = docx.Document()
+    hp = doc.add_paragraph()
+    hp.add_run("Jane Doe")
+    aff = hp.add_run("1,2")
+    aff.font.superscript = True
+    doc.add_heading("Introduction", level=1)
+    doc.add_paragraph("Body text with no citations here.")
+    path = tmp_path / "aff.docx"
+    doc.save(str(path))
+
+    ms = parse_docx(path, None)
+    assert ms.superscript_citations == set()

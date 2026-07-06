@@ -12,6 +12,7 @@ from docx.table import Table
 from docx.text.paragraph import Paragraph as DocxParagraph
 
 from sub_checker.models import Manuscript, Paragraph, Section
+from sub_checker.tools.manuscript_tools import superscript_run_citations
 
 _REFERENCE_HEADINGS = {"references", "bibliography", "works cited", "literature cited"}
 _ABSTRACT_HEADINGS = {"abstract", "summary"}
@@ -107,6 +108,7 @@ def parse_docx(docx_path: Path, figure_dir: Path | None = None) -> Manuscript:
     ref_lines: list[str] = []
     body_lines: list[str] = []  # Everything except the reference list
     header_lines: list[str] = []  # Text before first heading
+    superscript_citations: set[int] = set()  # numbers cited via superscript, body only
     first_heading_seen = False
 
     def add_content_paragraph(text: str, is_table: bool = False) -> None:
@@ -168,6 +170,14 @@ def parse_docx(docx_path: Path, figure_dir: Path | None = None) -> Manuscript:
         if not first_heading_seen:
             header_lines.append(text)
 
+        # Collect superscript-number citations from the body only. Excludes the
+        # reference list and the pre-heading header (author affiliation markers
+        # are superscript numbers too, but they are not citations).
+        if first_heading_seen and not in_references:
+            for run in para.runs:
+                if run.font.superscript:
+                    superscript_citations |= superscript_run_citations(run.text)
+
         add_content_paragraph(text)
 
     if ref_lines:
@@ -189,4 +199,5 @@ def parse_docx(docx_path: Path, figure_dir: Path | None = None) -> Manuscript:
         figure_dir=figure_dir,
         header_text=header_text,
         body_text=body_text,
+        superscript_citations=superscript_citations,
     )

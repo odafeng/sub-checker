@@ -36,6 +36,7 @@ class Manuscript:
     figure_dir: Path | None = None
     header_text: str = ""  # Raw text before first heading (title, authors, abstract, etc.)
     body_text: str = ""  # raw_text minus the reference list (for citation scans)
+    superscript_citations: set[int] = field(default_factory=set)  # numbers cited via superscript (body only)
 
 
 @dataclass
