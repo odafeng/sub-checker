@@ -9,7 +9,21 @@ from sub_checker.tools.manuscript_tools import (
     read_paragraph,
     read_section,
     search_text,
+    superscript_run_citations,
 )
+
+
+def test_superscript_run_citations_parses_citation_lists():
+    assert superscript_run_citations("15,16") == {15, 16}
+    assert superscript_run_citations("5-7") == {5, 6, 7}
+    assert superscript_run_citations("3") == {3}
+
+
+def test_superscript_run_citations_rejects_non_citation_runs():
+    assert superscript_run_citations("nd") == set()  # "2nd" tail
+    assert superscript_run_citations("a") == set()
+    assert superscript_run_citations("") == set()
+    assert superscript_run_citations("2023") == set()  # year > 999 bound
 
 
 def test_read_section(sample_manuscript: Manuscript):

@@ -30,19 +30,52 @@ def extract_citation_numbers(raw_text: str, square_only: bool = False) -> set[in
     # Match patterns like (1), [1], (1-3), [1,2,5], (1, 2, 5-7), etc.
     pattern = r"\[([\d,\-\u2013\s]+)\]" if square_only else r"[\(\[]([\d,\-\u2013\s]+)[\)\]]"
     for m in re.findall(pattern, raw_text):
-        for part in re.split(r"[,\s]+", m):
-            part = part.strip()
-            if "\u2013" in part or "-" in part:  # en dash or hyphen
-                rng = re.split(r"[\u2013-]", part)
-                if len(rng) == 2 and rng[0].strip().isdigit() and rng[1].strip().isdigit():
-                    lo, hi = int(rng[0].strip()), int(rng[1].strip())
-                    if 1 <= lo <= hi <= _MAX_CITATION_NUMBER:
-                        cited.update(range(lo, hi + 1))
-            elif part.isdigit():
-                n = int(part)
-                if 1 <= n <= _MAX_CITATION_NUMBER:  # citations are 1-based; (0) is data
-                    cited.add(n)
+        cited |= _numbers_in_citation_group(m)
     return cited
+
+
+# A superscript run is treated as a citation list only if it is nothing but
+# digits, commas, and hyphen/en-dash ranges \u2014 "15", "1,2", "5-7". This still
+# matches a bare "2" (which could be an exponent like m\u00b2); callers must keep
+# superscript numbers out of the filter-capable set so that ambiguity can only
+# downgrade, never hard-delete (see the design's fail-safe).
+_SUPERSCRIPT_CITATION_RE = re.compile(r"^\d+(?:\s*[,\-\u2013]\s*\d+)*$")
+
+
+def _numbers_in_citation_group(group: str) -> set[int]:
+    """Parse a citation group body like '1, 2, 5-7' into individual numbers.
+
+    Years and implausibly large values are excluded via _MAX_CITATION_NUMBER;
+    malformed or out-of-range ranges are dropped.
+    """
+    found: set[int] = set()
+    for part in re.split(r"[,\s]+", group):
+        part = part.strip()
+        if not part:
+            continue
+        if "\u2013" in part or "-" in part:  # en dash or hyphen
+            rng = re.split(r"[\u2013-]", part)
+            if len(rng) == 2 and rng[0].strip().isdigit() and rng[1].strip().isdigit():
+                lo, hi = int(rng[0].strip()), int(rng[1].strip())
+                if 1 <= lo <= hi <= _MAX_CITATION_NUMBER:
+                    found.update(range(lo, hi + 1))
+        elif part.isdigit():
+            n = int(part)
+            if 1 <= n <= _MAX_CITATION_NUMBER:  # citations are 1-based; (0) is data
+                found.add(n)
+    return found
+
+
+def superscript_run_citations(run_text: str) -> set[int]:
+    """Numbers from a superscript run's text, if it is a pure citation list.
+
+    Returns an empty set for runs that aren't citation-shaped (e.g. the 'nd' in
+    a superscript '2nd', stray letters). A bare '2' still parses to {2}.
+    """
+    text = run_text.strip()
+    if not text or not _SUPERSCRIPT_CITATION_RE.match(text):
+        return set()
+    return _numbers_in_citation_group(text)
 
 
 _REF_ENTRY_START = re.compile(r"^\d{1,3}[.)\s]")
