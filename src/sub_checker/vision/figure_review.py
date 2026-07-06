@@ -72,24 +72,28 @@ Always call report_figure_findings exactly once."""
 def extract_figure_legend(raw_text: str, number: int) -> str:
     """Return the legend block for figure `number`, or "".
 
-    Collects the text after each "Figure N" label up to the next figure label
-    (any number) or end of text, and returns the longest such block — the real
-    legend is typically far longer than an in-text "see Figure N" reference.
+    Only matches a caption START: "Figure N" at the beginning of a line,
+    followed by a "." or ":" delimiter — this excludes in-text references like
+    "Figure 1 shows ...", which the length heuristic could otherwise pick over
+    the real (shorter) caption. Returns the longest matching block.
     """
     candidates = [
         c.strip()
         for c in re.findall(
-            rf"{_FIG_LABEL}{number}\b[.:]?\s*(.*?)(?=\n\s*{_FIG_LABEL}\d|\Z)",
+            rf"^[ \t]*{_FIG_LABEL}{number}\s*[.:]\s*(.*?)(?=\n[ \t]*{_FIG_LABEL}\d|\Z)",
             raw_text,
-            re.DOTALL | re.IGNORECASE,
+            re.DOTALL | re.IGNORECASE | re.MULTILINE,
         )
     ]
     return max(candidates, key=len) if candidates else ""
 
 
 def _figure_number(path: Path) -> int | None:
-    m = re.search(r"\d+", path.stem)
-    return int(m.group()) if m else None
+    # Require a Figure/Fig prefix so stray assets (image1.png, scan1.png, a
+    # logo) in the manuscript's directory aren't mistaken for figures and sent
+    # to the vision model against an unrelated legend.
+    m = re.match(r"(?:figure|fig)[\s._-]*(\d+)", path.stem, re.IGNORECASE)
+    return int(m.group(1)) if m else None
 
 
 class FigureVisionChecker:

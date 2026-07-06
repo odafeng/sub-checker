@@ -51,3 +51,11 @@ def test_websocket_rejects_invalid_session():
     with client.websocket_connect("/ws/check/does-not-exist") as ws:
         msg = ws.receive_json()
     assert msg["type"] == "error"
+
+
+def test_figure_vision_not_advertised_in_web_checkers():
+    # The web flow has no figure-upload endpoint, so figure_vision would always
+    # no-op there — it must not be offered in the GUI checker list.
+    from sub_checker.api import ALL_CHECKERS
+
+    assert "figure_vision" not in {c["name"] for c in ALL_CHECKERS}

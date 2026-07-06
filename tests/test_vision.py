@@ -73,6 +73,29 @@ def test_extract_figure_legend_absent_returns_empty():
     assert extract_figure_legend("No figures mentioned here.", 1) == ""
 
 
+def test_extract_figure_legend_ignores_in_text_reference_prose():
+    # An in-text "Figure 1 shows ..." sentence (no caption delimiter) must not
+    # be picked as the legend even when it is longer than the real caption.
+    text = (
+        "Figure 1 shows a large tumour and we discuss its many implications in "
+        "great and lengthy detail across this very long run-on sentence here.\n\n"
+        "Figure 1. CT scan.\n\nFigure 2. MRI."
+    )
+    assert extract_figure_legend(text, 1) == "CT scan."
+
+
+def test_figure_number_requires_figure_naming():
+    from sub_checker.vision.figure_review import _figure_number
+
+    assert _figure_number(Path("Figure1.png")) == 1
+    assert _figure_number(Path("Fig_2.tif")) == 2
+    assert _figure_number(Path("figure 3.png")) == 3
+    # Non-figure assets must NOT be treated as figures
+    assert _figure_number(Path("image1.png")) is None
+    assert _figure_number(Path("scan1.png")) is None
+    assert _figure_number(Path("logo.png")) is None
+
+
 def _ms_with_fig(tmp_path: Path, legend: str) -> Manuscript:
     (tmp_path / "Figure1.png").write_bytes(b"\x89PNG fake")
     return Manuscript(title="T", sections=[], paragraphs=[], raw_text=legend, figure_dir=tmp_path)

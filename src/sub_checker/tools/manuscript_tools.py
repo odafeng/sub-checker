@@ -49,18 +49,16 @@ def _numbers_in_citation_group(group: str) -> set[int]:
     malformed or out-of-range ranges are dropped.
     """
     found: set[int] = set()
-    for part in re.split(r"[,\s]+", group):
-        part = part.strip()
-        if not part:
-            continue
-        if "\u2013" in part or "-" in part:  # en dash or hyphen
-            rng = re.split(r"[\u2013-]", part)
-            if len(rng) == 2 and rng[0].strip().isdigit() and rng[1].strip().isdigit():
-                lo, hi = int(rng[0].strip()), int(rng[1].strip())
-                if 1 <= lo <= hi <= _MAX_CITATION_NUMBER:
-                    found.update(range(lo, hi + 1))
-        elif part.isdigit():
-            n = int(part)
+    # Match a range ("5-7", "5 \u2013 7" with spaces) or a lone number, left to
+    # right. Matching the whole range as one token means spaces around the dash
+    # no longer split it into disconnected endpoints (which dropped the middle).
+    for m in re.finditer(r"(\d+)\s*[\u2013-]\s*(\d+)|(\d+)", group):
+        if m.group(1) is not None:
+            lo, hi = int(m.group(1)), int(m.group(2))
+            if 1 <= lo <= hi <= _MAX_CITATION_NUMBER:
+                found.update(range(lo, hi + 1))
+        else:
+            n = int(m.group(3))
             if 1 <= n <= _MAX_CITATION_NUMBER:  # citations are 1-based; (0) is data
                 found.add(n)
     return found
