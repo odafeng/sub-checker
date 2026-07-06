@@ -26,6 +26,26 @@ def test_superscript_run_citations_rejects_non_citation_runs():
     assert superscript_run_citations("2023") == set()  # year > 999 bound
 
 
+_EN_DASH = chr(0x2013)  # U+2013, kept out of source literals to avoid RUF001
+
+
+def test_superscript_run_citations_expands_spaced_range():
+    # A range with spaces around the en dash must still expand fully.
+    assert superscript_run_citations(f"5 {_EN_DASH} 7") == {5, 6, 7}
+    assert superscript_run_citations("1 - 3") == {1, 2, 3}
+
+
+def test_extract_citation_numbers_expands_spaced_range():
+    assert extract_citation_numbers(f"see [5 {_EN_DASH} 7] and [10 - 12]") == {
+        5,
+        6,
+        7,
+        10,
+        11,
+        12,
+    }
+
+
 def test_read_section(sample_manuscript: Manuscript):
     result = read_section(sample_manuscript, "Introduction")
     assert "Disease Y" in result
