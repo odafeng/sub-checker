@@ -92,6 +92,15 @@ def _judge_period(
     return None
 
 
+def _demote_filter(action: str) -> str:
+    """Downgrade a "filter" to "downgrade"; leave other actions unchanged.
+
+    Used on heuristic (prose-parsed) date verdicts so they can never hard-delete
+    a finding — only exact-data paths are allowed to filter.
+    """
+    return "downgrade" if action == "filter" else action
+
+
 def validate_date_claims(
     findings: list[Finding], today: datetime | None = None
 ) -> list[tuple[int, str, str]]:
@@ -112,7 +121,13 @@ def validate_date_claims(
                     actions.append((i, judged[0], judged[1]))
             continue
 
-        # Fallback: parse the finding's prose
+        # Fallback: parse the finding's prose. This is a heuristic — it GUESSES
+        # the finding is a future-date claim from a date appearing near
+        # "future"/"未來", which misfires when a finding merely mentions a past
+        # date near that word (e.g. "Results from 2018 will inform future work").
+        # So, per this module's fail-safe rule, the prose path may only downgrade;
+        # a hard "filter" is demoted. Only the structured future_date path above
+        # (where the agent explicitly asserted the claim) is exact enough to filter.
         msg = (f.message or "") + " " + (f.suggestion or "")
         # Look for patterns like "November 2025 是未來日期" or "future date"
         future_match = re.search(
@@ -133,7 +148,7 @@ def validate_date_claims(
             )
             judged = _judge_period(start, nxt, today, future_match.group(1))
             if judged:
-                actions.append((i, judged[0], judged[1]))
+                actions.append((i, _demote_filter(judged[0]), judged[1]))
 
         # Also check "YYYY 是未來" patterns (year-only — works for Chinese
         # month phrasing like "2026年12月" too, where the English-month regex
@@ -146,7 +161,7 @@ def validate_date_claims(
                 nxt = datetime(year + 1, 1, 1, tzinfo=UTC)
                 judged = _judge_period(start, nxt, today, f"Year {year}")
                 if judged:
-                    actions.append((i, judged[0], judged[1]))
+                    actions.append((i, _demote_filter(judged[0]), judged[1]))
 
     return actions
 
@@ -167,7 +182,12 @@ def validate_citation_numbers(
     Catches false positives like "reference [23] not cited" when regex
     confirms it IS cited.
     """
-    cited = extract_citation_numbers(manuscript.body_text or manuscript.raw_text)
+    body = manuscript.body_text or manuscript.raw_text
+    cited = extract_citation_numbers(body)
+    # Square-bracket citations are unambiguous; round-paren numbers may be
+    # inline enumerations ("(1) safety, (2) efficacy") or parenthetical data,
+    # so only the square-bracket set is exact enough to justify a hard filter.
+    cited_square = extract_citation_numbers(body, square_only=True)
     ref_count = count_references(manuscript.reference_section)
     actions: list[tuple[int, str, str]] = []
 
@@ -181,18 +201,31 @@ def validate_citation_numbers(
         )
 
         # "reference [X] is never cited in the text"
-        # The cited-number set comes from a regex scan of the full manuscript
-        # text — exact data, so a contradiction justifies filtering.
         if is_uncited_claim:
             num = _extract_ref_number(
                 f, r"(?:reference|參考文獻)\s*\[?(\d+)\]?\s*(?:not cited|未.*引用|未被引用)"
             )
-            if num is not None and num in cited:
+            if num is not None and num in cited_square:
+                # [X] appears in the text as a bracket citation — unambiguous
+                # contradiction of the "never cited" claim, so filter.
                 actions.append(
                     (
                         i,
                         "filter",
                         f"Reference [{num}] IS cited in text (deterministic scan confirms)",
+                    )
+                )
+                continue
+            if num is not None and num in cited:
+                # X only appears as "(X)" — could be a citation OR an inline
+                # enumeration / parenthetical value, so this is a heuristic:
+                # downgrade and let the reviewer confirm (never hard-delete).
+                actions.append(
+                    (
+                        i,
+                        "downgrade",
+                        f"({num}) appears in text but only in round parentheses — "
+                        f"may be a citation or an inline enumeration; needs reviewer confirmation",
                     )
                 )
                 continue

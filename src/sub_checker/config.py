@@ -14,11 +14,9 @@ class FigureConfig(BaseModel):
 
 class ClaimConfig(BaseModel):
     enabled: bool = True
-    model: str = "claude-opus-4-8"
     pubmed_email: str | None = None
     pubmed_api_key: str | None = None
     max_concurrent_pubmed: int = 3
-    max_concurrent_llm: int = 5
 
 
 # Mechanical checkers default to Sonnet: their work (pattern matching,
@@ -99,14 +97,15 @@ figures:
   pattern: "Figure{n}.png"
   case_sensitive: false
 
-# Citation-claim verification
+# Citation-claim verification. This checker is the most expensive (it runs a
+# multi-source PubMed/Semantic Scholar/Crossref pre-pass and uses the global
+# `model`); set enabled: false to skip it. To run it on a different model, use
+# the top-level `models:` override, not a per-claim model.
 claim:
   enabled: true
-  model: "claude-opus-4-8"
   pubmed_email: null
   pubmed_api_key: null
   max_concurrent_pubmed: 3
-  max_concurrent_llm: 5
 
 # Custom dictionary (words to ignore in typo check)
 custom_dictionary: []

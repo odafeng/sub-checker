@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import logging
 import shutil
@@ -174,7 +175,19 @@ async def websocket_check(websocket: WebSocket, session_id: str) -> None:
 
     run_data["running"] = True
     try:
-        config_msg = await websocket.receive_json()
+        # Bound the wait for the config message: a client that connects but
+        # never sends would otherwise pin the session in running=True forever,
+        # and _cleanup_stale_sessions never prunes a "running" session, so its
+        # temp dir would leak for the process lifetime.
+        try:
+            config_msg = await asyncio.wait_for(websocket.receive_json(), timeout=60)
+        except TimeoutError:  # asyncio.TimeoutError is an alias for this on 3.11+
+            with contextlib.suppress(Exception):
+                await websocket.send_json(
+                    {"type": "error", "message": "Timed out waiting for check configuration"}
+                )
+                await websocket.close()
+            return
         journal = config_msg.get("journal", "")
         selected = set(config_msg.get("checkers", []))
         lang = config_msg.get("lang", "en")

@@ -79,6 +79,39 @@ async def test_circuit_breaker_half_opens_after_cooldown(fast_client):
     assert client._circuit_open
 
 
+@pytest.mark.asyncio
+async def test_rate_limiter_spaces_consecutive_requests(monkeypatch):
+    """The min-interval gate must delay the second back-to-back request."""
+
+    clock = {"t": 1000.0}
+    slept: list[float] = []
+
+    monkeypatch.setattr(hc.time, "monotonic", lambda: clock["t"])
+
+    async def fake_sleep(delay):
+        slept.append(delay)
+        clock["t"] += delay  # advance the virtual clock as a real sleep would
+
+    monkeypatch.setattr(hc.asyncio, "sleep", fake_sleep)
+
+    class _OKClient:
+        async def get(self, url, params=None):
+            return httpx.Response(200, request=httpx.Request("GET", url))
+
+    client = RateLimitedClient(min_interval=0.5)
+
+    async def _get_client():
+        return _OKClient()
+
+    client._get_client = _get_client  # type: ignore[method-assign]
+
+    await client._rate_limited_get("https://api.example.com/a")
+    await client._rate_limited_get("https://api.example.com/b")
+
+    # First request doesn't wait; the second is gated by ~min_interval.
+    assert slept == [pytest.approx(0.5)]
+
+
 def test_extract_year_ignores_page_ranges():
     assert _extract_year("J Clin Oncol. 2010;28:2013-2019.") == "2010"
     assert _extract_year("Heald RJ (1982) The mesorectum. Br J Surg 69:613-616") == "1982"

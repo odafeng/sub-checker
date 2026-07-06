@@ -6,22 +6,30 @@ import re
 
 from sub_checker.models import Manuscript
 
-# Numbers at or above this are not plausible citation numbers \u2014 they are
+# Numbers ABOVE this are not plausible citation numbers \u2014 they are
 # years like (2023), page ranges like (1023-1045), or sample sizes.
+# (The boundary value itself is inclusive: [999] counts as a citation.)
 _MAX_CITATION_NUMBER = 999
 
 
-def extract_citation_numbers(raw_text: str) -> set[int]:
+def extract_citation_numbers(raw_text: str, square_only: bool = False) -> set[int]:
     """Deterministic extraction of all numbered citations from manuscript text.
 
     Handles: (1), [1], (1-3), [1-3], (1,2,5), (1, 2, 5), etc.
     Year-like numbers such as (2023) and ranges with implausibly large
     endpoints are excluded.
     Returns the set of all individual reference numbers found.
+
+    When ``square_only`` is True, only square-bracket forms ([1], [1-3]) are
+    matched. Round-paren forms like "(1)" are ambiguous \u2014 they are equally
+    likely to be inline enumerations ("aims: (1) safety, (2) efficacy") or
+    parenthetical data \u2014 so a caller that must not act on that ambiguity can
+    restrict extraction to the unambiguous bracket citation syntax.
     """
     cited: set[int] = set()
     # Match patterns like (1), [1], (1-3), [1,2,5], (1, 2, 5-7), etc.
-    for m in re.findall(r"[\(\[]([\d,\-\u2013\s]+)[\)\]]", raw_text):
+    pattern = r"\[([\d,\-\u2013\s]+)\]" if square_only else r"[\(\[]([\d,\-\u2013\s]+)[\)\]]"
+    for m in re.findall(pattern, raw_text):
         for part in re.split(r"[,\s]+", m):
             part = part.strip()
             if "\u2013" in part or "-" in part:  # en dash or hyphen

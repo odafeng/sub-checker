@@ -113,7 +113,9 @@ def main(
     # Parse manuscript
     ms_path = Path(manuscript_path)
     if ms_path.is_dir():
-        docx_files = list(ms_path.glob("*.docx"))
+        # Sorted for deterministic selection: an unsorted glob can pick a
+        # different .docx across runs/machines when several are present.
+        docx_files = sorted(ms_path.glob("*.docx"))
         if not docx_files:
             console.print("[red]No .docx file found in directory.[/red]")
             raise SystemExit(1)

@@ -55,8 +55,7 @@ class WebService:
 
     def _parse_ddg_html(self, html: str) -> list[dict[str, Any]]:
         """Parse DuckDuckGo HTML results (basic extraction)."""
-        results = []
-        # Extract result links and snippets
+        results: list[dict[str, Any]] = []
         link_pattern = re.compile(
             r'class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)</a>',
             re.DOTALL,
@@ -66,14 +65,19 @@ class WebService:
             re.DOTALL,
         )
 
-        links = link_pattern.findall(html)
-        snippets = snippet_pattern.findall(html)
-
-        for i, (url, title) in enumerate(links[:10]):
+        # Parse per-result: split at each result link so a result that lacks a
+        # snippet block can't shift every following snippet onto the wrong link
+        # (which index-pairing two independent findall() lists would do).
+        for segment in re.split(r'(?=class="result__a")', html)[1:]:
+            link_match = link_pattern.search(segment)
+            if not link_match:
+                continue
+            url, title = link_match.group(1), link_match.group(2)
             clean_title = re.sub(r"<[^>]+>", "", title).strip()
-            snippet = ""
-            if i < len(snippets):
-                snippet = re.sub(r"<[^>]+>", "", snippets[i]).strip()
+            snippet_match = snippet_pattern.search(segment)
+            snippet = (
+                re.sub(r"<[^>]+>", "", snippet_match.group(1)).strip() if snippet_match else ""
+            )
             if url.startswith("//duckduckgo.com/l/"):
                 # Extract actual URL from DDG redirect
                 url_match = re.search(r"uddg=([^&]+)", url)
@@ -82,6 +86,8 @@ class WebService:
 
                     url = unquote(url_match.group(1))
             results.append({"title": clean_title, "url": url, "snippet": snippet})
+            if len(results) >= 10:
+                break
 
         return results
 

@@ -16,6 +16,7 @@ jobs:
       contents: read
       pull-requests: write
       issues: write
+      id-token: write  # required by claude-code-action for OIDC token exchange
     steps:
       - uses: anthropics/claude-code-action@v1
         with:

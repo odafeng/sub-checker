@@ -50,7 +50,9 @@ jobs:
           cache: "pip"
           cache-dependency-path: pyproject.toml
       - name: Install dependencies
-        run: pip install -e ".[dev]"
+        # [web] too, so the FastAPI upload/websocket tests actually run in CI
+        # instead of being skipped via importorskip.
+        run: pip install -e ".[dev,web]"
       - name: Run tests
         run: pytest -v
 

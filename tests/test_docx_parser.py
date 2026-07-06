@@ -135,7 +135,7 @@ def test_parse_docx_table_content_visible(tmp_path: Path):
     doc.add_heading("Discussion", level=1)
     doc.add_paragraph("We discuss the results here.")
     path = tmp_path / "with_table.docx"
-    doc.save(path)
+    doc.save(str(path))
 
     ms = parse_docx(path, None)
     assert "Survival rate" in ms.raw_text
@@ -146,3 +146,38 @@ def test_parse_docx_table_content_visible(tmp_path: Path):
     # And not leaked into the next section
     discussion = next(s for s in ms.sections if s.heading == "Discussion")
     assert not any("85.3%" in p.text for p in discussion.paragraphs)
+
+
+def test_table_repeated_cell_values_preserved(tmp_path: Path):
+    """Coincidentally-equal adjacent cells (non-merged) must NOT be collapsed."""
+    import docx
+
+    doc = docx.Document()
+    doc.add_heading("Results", level=1)
+    table = doc.add_table(rows=1, cols=3)
+    table.cell(0, 0).text = "Arm A"
+    table.cell(0, 1).text = "10"
+    table.cell(0, 2).text = "10"  # baseline N and follow-up N both 10 — a real data cell
+    path = tmp_path / "repeated.docx"
+    doc.save(str(path))
+
+    ms = parse_docx(path, None)
+    assert "Arm A | 10 | 10" in ms.raw_text
+
+
+def test_table_merged_cells_collapsed(tmp_path: Path):
+    """A genuine horizontal merge still collapses to a single cell."""
+    import docx
+
+    doc = docx.Document()
+    doc.add_heading("Results", level=1)
+    table = doc.add_table(rows=1, cols=3)
+    table.cell(0, 0).text = "Header"
+    merged = table.cell(0, 1).merge(table.cell(0, 2))
+    merged.text = "Spanning"
+    path = tmp_path / "merged.docx"
+    doc.save(str(path))
+
+    ms = parse_docx(path, None)
+    assert "Header | Spanning" in ms.raw_text
+    assert "Spanning | Spanning" not in ms.raw_text

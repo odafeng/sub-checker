@@ -186,9 +186,11 @@ def _cross_validate(
             if sim > best_score:
                 best_score = sim
                 best_match = {"source": source_name, id_key: r.get(id_key), "title": title}
+            # Don't break on the first >0.55 hit: results aren't guaranteed to be
+            # sorted best-first, so keep scanning to capture the true best_score.
+            # The `not in sources_found` guard already prevents double-counting.
             if sim > 0.55 and source_name not in sources_found:
                 sources_found.append(source_name)
-                break
 
     # Determine confidence and status. Multi-source counts scale with the
     # best title similarity so three weak 0.56 matches can't reach 0.95.
