@@ -65,6 +65,16 @@ def test_prescan_flags_dangling_and_uncited_numbers():
     assert "possibly NOT cited" in msg
 
 
+def test_prescan_includes_superscript_citations():
+    # Body has no bracketed citations, only a superscript "[7]"-equivalent.
+    ms = _ms("Effect was large.", reference_section="1. A.\n2. B.\n3. C.")
+    ms.superscript_citations = {7}
+    msg = CitationExistAgent()._build_initial_message(ms, Config(cot_dir="disabled"))
+    # 7 is cited (via superscript) but only 3 references exist → dangling
+    assert "NOT in the reference list" in msg
+    assert "[7]" in msg
+
+
 def test_prescan_no_phantom_dangling_when_refs_absent():
     # With no reference list, ref_nums is empty and the guard must suppress the
     # "dangling citation" line rather than flag every cited number as dangling.
