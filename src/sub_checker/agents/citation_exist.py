@@ -42,7 +42,10 @@ class CitationExistAgent(BaseCheckerAgent):
 
         # Deterministic pre-pass — scan body only, or volume(issue) patterns in
         # the reference list (e.g. "2022;101(27)") show up as phantom citations
-        cited_nums = extract_citation_numbers(manuscript.body_text or manuscript.raw_text)
+        cited_nums = (
+            extract_citation_numbers(manuscript.body_text or manuscript.raw_text)
+            | manuscript.superscript_citations
+        )
         ref_count = count_references(manuscript.reference_section)
         ref_nums = set(range(1, ref_count + 1)) if ref_count > 0 else set()
 
