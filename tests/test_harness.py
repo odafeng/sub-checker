@@ -165,6 +165,30 @@ def test_uncited_reference_paren_only_downgraded_not_filtered():
     assert actions[0][1] == "downgrade"
 
 
+def test_uncited_superscript_citation_downgraded_not_filtered():
+    # A superscript citation [15] contradicts an "uncited [15]" claim, but
+    # superscript is NOT in the filter-capable set → downgrade, never filter.
+    ms = _manuscript(raw_text="No bracketed citations here.")
+    ms.superscript_citations = {15}
+    f = _finding(
+        message="Reference 15 is never cited", claim_type="uncited_reference", ref_number=15
+    )
+    actions = validate_citation_numbers([f], ms)
+    assert len(actions) == 1
+    assert actions[0][1] == "downgrade"
+
+
+def test_superscript_exponent_cannot_hard_filter():
+    # Even if an exponent like m² is mis-read as superscript "2", an
+    # "uncited [2]" finding is only downgraded, never deleted.
+    ms = _manuscript(raw_text="Area was 4 m2 in size.")
+    ms.superscript_citations = {2}  # as the parser would yield for m²
+    f = _finding(message="Reference 2 is never cited", claim_type="uncited_reference", ref_number=2)
+    actions = validate_citation_numbers([f], ms)
+    assert len(actions) == 1
+    assert actions[0][1] == "downgrade"
+
+
 def test_uncited_reference_square_bracket_is_exact_and_filtered():
     # A square-bracket citation is unambiguous, so the "never cited" claim is
     # provably wrong and may be filtered.

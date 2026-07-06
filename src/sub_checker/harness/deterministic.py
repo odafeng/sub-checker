@@ -183,7 +183,10 @@ def validate_citation_numbers(
     confirms it IS cited.
     """
     body = manuscript.body_text or manuscript.raw_text
-    cited = extract_citation_numbers(body)
+    # Superscript citations join `cited` (so the cross-check sees them) but are
+    # deliberately kept out of `cited_square` below: a superscript number could
+    # be an exponent (m²), so it may only downgrade, never hard-filter.
+    cited = extract_citation_numbers(body) | manuscript.superscript_citations
     # Square-bracket citations are unambiguous; round-paren numbers may be
     # inline enumerations ("(1) safety, (2) efficacy") or parenthetical data,
     # so only the square-bracket set is exact enough to justify a hard filter.
