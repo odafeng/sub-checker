@@ -321,6 +321,7 @@ async def run_reviewer(
 
         confirmed = downgraded = filtered = 0
         batch_end = batch_start + len(batch)
+        reviewed: set[int] = set()
         for verdict in verdicts:
             if not isinstance(verdict, dict):
                 continue
@@ -341,6 +342,7 @@ async def run_reviewer(
                 )
                 continue
 
+            reviewed.add(idx)
             finding = findings[idx]
             try:
                 finding.confidence = float(confidence)
@@ -366,6 +368,23 @@ async def run_reviewer(
                     finding.severity = finding.original_severity
                     finding.original_severity = None
                 confirmed += 1
+
+        # Completeness check: the model may return fewer verdicts than the
+        # batch size. Uncovered findings keep their prior (visible) state —
+        # never silently dropped — but we flag them so it's traceable.
+        missing = set(range(batch_start, batch_end)) - reviewed
+        if missing:
+            logger.warning(
+                "Reviewer covered %d/%d findings in batch %d; no verdict for indices %s",
+                len(reviewed),
+                len(batch),
+                batch_start,
+                sorted(missing),
+            )
+            for idx in missing:
+                finding = findings[idx]
+                if not finding.validation_note:
+                    finding.validation_note = "[reviewer] no verdict returned — left unvalidated"
         return (confirmed, downgraded, filtered)
 
     batches = [

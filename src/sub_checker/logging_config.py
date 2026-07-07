@@ -111,6 +111,10 @@ class AgentCOTLogger:
                     )
                 elif block.type == "text":
                     blocks_summary.append({"type": "text", "text": block.text[:500]})
+                elif block.type == "thinking":
+                    blocks_summary.append({"type": "thinking", "text": block.thinking[:500]})
+                elif block.type == "redacted_thinking":
+                    blocks_summary.append({"type": "redacted_thinking"})
 
         entry = {
             "type": "api_response",
