@@ -290,6 +290,11 @@ def validate_self_consistency(
     return actions
 
 
+# Stronger actions win when multiple validators flag the same finding: a
+# "filter" decision must never be overwritten by a weaker "downgrade".
+_ACTION_RANK = {"filter": 2, "downgrade": 1}
+
+
 def run_deterministic_checks(
     results: list[CheckerResult], manuscript: Manuscript
 ) -> list[CheckerResult]:
@@ -305,7 +310,15 @@ def run_deterministic_checks(
         all_actions.extend(validate_citation_numbers(result.findings, manuscript))
         all_actions.extend(validate_self_consistency(result.findings))
 
+        # Resolve conflicts before mutating: keep only the strongest action per
+        # finding index so validator order can't downgrade a filtered finding.
+        best: dict[int, tuple[str, str]] = {}
         for idx, action, reason in all_actions:
+            current = best.get(idx)
+            if current is None or _ACTION_RANK[action] > _ACTION_RANK[current[0]]:
+                best[idx] = (action, reason)
+
+        for idx, (action, reason) in best.items():
             if 0 <= idx < len(result.findings):
                 finding = result.findings[idx]
                 finding.validation_note = f"[deterministic] {reason}"

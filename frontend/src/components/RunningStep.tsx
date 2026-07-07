@@ -78,10 +78,16 @@ export default function RunningStep({ progress, totalAgents, lang }: Props) {
 
   for (const p of progress) {
     if (p.type === "agent_start" && p.agent) started.add(p.agent);
-    if (p.type === "agent_done" && p.agent)
+    // done/error are mutually exclusive terminal states: a later event wins so
+    // an agent that emits both agent_done and agent_error is counted only once.
+    if (p.type === "agent_done" && p.agent) {
+      errors.delete(p.agent);
       done.set(p.agent, { findings: p.findings_count ?? 0, elapsed: p.elapsed ?? 0 });
-    if (p.type === "agent_error" && p.agent)
+    }
+    if (p.type === "agent_error" && p.agent) {
+      done.delete(p.agent);
       errors.set(p.agent, p.error ?? "Unknown error");
+    }
     if (p.type === "error") globalErrors.push(p.error ?? p.message ?? "Unknown error");
   }
 

@@ -14,6 +14,16 @@ def _report(findings: list[Finding]):
     return build_report([result], manuscript_path="m.docx", journal=None, model="claude-opus-4-8")
 
 
+def test_html_confidence_badge_survives_none_confidence():
+    # A confirmed/downgraded finding whose confidence is None must not crash the
+    # HTML reporter (the `{f.confidence:.0%}` format would raise on None).
+    f = Finding(checker="logic", severity=Severity.WARNING, message="msg")
+    f.validation_status = "confirmed"
+    f.confidence = None  # type: ignore[assignment]  # slips through at runtime (no validate_assignment)
+    html = format_html(_report([f]))
+    assert "msg" in html  # rendered without a confidence badge, no exception
+
+
 def test_html_escapes_finding_text():
     # Finding text is derived from the manuscript and the model, and the HTML
     # report is served to browsers — so every field must be escaped.

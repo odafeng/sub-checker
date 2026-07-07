@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import yaml
@@ -57,12 +58,23 @@ class Config(BaseModel):
 
 
 def load_config(config_path: Path | None = None) -> Config:
-    """Load config from YAML file, falling back to defaults."""
+    """Load config from YAML file, falling back to defaults.
+
+    Secrets (PubMed credentials) are read from the environment, never from the
+    committed config file: PUBMED_API_KEY / PUBMED_EMAIL fill in any value left
+    as null in the YAML.
+    """
     if config_path and config_path.exists():
         with open(config_path) as f:
             data = yaml.safe_load(f) or {}
-        return Config(**data)
-    return Config()
+        config = Config(**data)
+    else:
+        config = Config()
+    if config.claim.pubmed_api_key is None:
+        config.claim.pubmed_api_key = os.environ.get("PUBMED_API_KEY")
+    if config.claim.pubmed_email is None:
+        config.claim.pubmed_email = os.environ.get("PUBMED_EMAIL")
+    return config
 
 
 DEFAULT_CONFIG_YAML = """\

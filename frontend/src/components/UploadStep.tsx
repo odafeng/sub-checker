@@ -65,7 +65,7 @@ export default function UploadStep({ onUploaded, lang }: Props) {
 
   const upload = useCallback(
     async (file: File) => {
-      if (!file.name.endsWith(".docx")) {
+      if (!file.name.toLowerCase().endsWith(".docx")) {
         setError(zh ? "請上傳 .docx 檔案" : "Please upload a .docx file");
         return;
       }

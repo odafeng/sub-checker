@@ -391,3 +391,77 @@ def test_model_for_uses_per_checker_override():
 def test_model_for_empty_overrides_falls_back_to_global():
     config = Config(models={})
     assert config.model_for("typo_grammar") == "claude-opus-4-8"
+
+
+# --- deterministic conflict resolution: strongest action wins ---
+
+
+def test_filter_not_overwritten_by_later_downgrade(monkeypatch):
+    # Two validators flag the SAME finding index with different actions. The
+    # stronger "filter" (hide) must win regardless of validator order, so a
+    # provably-wrong finding is never resurrected as a downgraded INFO.
+    import sub_checker.harness.deterministic as det
+
+    for order in (("filter", "downgrade"), ("downgrade", "filter")):
+        first, second = order
+        monkeypatch.setattr(det, "validate_date_claims", lambda _f, a=first: [(0, a, a)])
+        monkeypatch.setattr(det, "validate_citation_numbers", lambda _f, _m, b=second: [(0, b, b)])
+        monkeypatch.setattr(det, "validate_self_consistency", lambda _f: [])
+
+        f = _finding(severity=Severity.ERROR, message="conflicting finding")
+        results = det.run_deterministic_checks(
+            [CheckerResult(checker_name="t", findings=[f])], _manuscript()
+        )
+        out = results[0].findings[0]
+        assert out.validation_status == "filtered", f"order={order}"
+        assert out.confidence == 0.0
+
+
+# --- config: secrets come from the environment, never the committed file ---
+
+
+def test_pubmed_credentials_read_from_env(monkeypatch):
+    from sub_checker.config import load_config
+
+    monkeypatch.setenv("PUBMED_API_KEY", "env-key-123")
+    monkeypatch.setenv("PUBMED_EMAIL", "env@example.com")
+    config = load_config()  # no file → defaults (null credentials) + env fallback
+    assert config.claim.pubmed_api_key == "env-key-123"
+    assert config.claim.pubmed_email == "env@example.com"
+
+
+def test_pubmed_credentials_none_without_env(monkeypatch):
+    from sub_checker.config import load_config
+
+    monkeypatch.delenv("PUBMED_API_KEY", raising=False)
+    monkeypatch.delenv("PUBMED_EMAIL", raising=False)
+    config = load_config()
+    assert config.claim.pubmed_api_key is None
+    assert config.claim.pubmed_email is None
+
+
+# --- reviewer completeness: partial verdicts don't silently drop findings ---
+
+
+async def test_reviewer_flags_findings_with_no_verdict(monkeypatch):
+    # The model returns a verdict for only one of three batched findings. The
+    # two uncovered findings must stay visible (status unchanged) and carry a
+    # traceable note rather than being silently left unreviewed.
+    import sub_checker.harness.reviewer as rev
+
+    findings = [_finding(message=f"issue {n}") for n in range(3)]
+    results = [CheckerResult(checker_name="t", findings=findings)]
+
+    async def fake_review_batch(_client, _model, _manuscript, _context, batch, _usage):
+        first_gidx = batch[0][0]
+        return [{"index": first_gidx, "action": "confirm", "confidence": 0.9, "reason": "ok"}]
+
+    monkeypatch.setattr(rev, "_review_batch", fake_review_batch)
+    out, _ = await run_reviewer(_manuscript(raw_text="text"), results)
+
+    fs = out[0].findings
+    assert fs[0].validation_status == "confirmed"
+    # Uncovered findings remain visible (not filtered) and are flagged.
+    for f in fs[1:]:
+        assert f.validation_status == ""
+        assert "no verdict" in f.validation_note

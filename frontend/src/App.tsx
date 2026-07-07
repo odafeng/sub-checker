@@ -178,7 +178,11 @@ export default function App() {
       }
     };
 
+    // onerror and onclose both fire on a single failed connection; the flag
+    // keeps that from producing two stacked error banners.
+    let hadError = false;
     ws.onerror = () => {
+      hadError = true;
       setProgress((prev) =>
         appendProgress(prev, { type: "error", error: "WebSocket connection failed" })
       );
@@ -188,6 +192,7 @@ export default function App() {
     // restart, network loss) — onclose is nulled on intentional close.
     ws.onclose = () => {
       wsRef.current = null;
+      if (hadError) return;
       setProgress((prev) =>
         appendProgress(prev, {
           type: "error",

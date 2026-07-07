@@ -57,6 +57,8 @@ def load_image_block(path: Path) -> dict | str | None:
                 buf = BytesIO()
                 rgb.save(buf, format="PNG")
             return _block("image/png", buf.getvalue())
-        except OSError:
+        except (OSError, ValueError, Image.DecompressionBombError):
+            # Corrupt, truncated, or oversized (decompression-bomb) TIFF:
+            # skip the figure rather than crash the whole review flow.
             return None
     return None

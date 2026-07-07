@@ -115,11 +115,11 @@ def format_html(report: Report, lang: str = "en") -> str:
             rows = []
             for f in sorted_findings:
                 confidence_badge = ""
-                if f.validation_status == "confirmed":
+                if f.validation_status == "confirmed" and f.confidence is not None:
                     confidence_badge = (
                         f' <span class="confidence-badge confirmed">{f.confidence:.0%}</span>'
                     )
-                elif f.validation_status == "downgraded":
+                elif f.validation_status == "downgraded" and f.confidence is not None:
                     confidence_badge = (
                         f' <span class="confidence-badge downgraded">{f.confidence:.0%}</span>'
                     )

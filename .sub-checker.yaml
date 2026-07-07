@@ -34,8 +34,10 @@ figures:
 claim:
   enabled: true
   model: "claude-opus-4-8"
-  pubmed_email: "odafeng@hotmail.com"
-  pubmed_api_key: "25cf0f039c94af6744a9b6facd5a9c083109"
+  # Credentials come from the environment, never this committed file:
+  # set PUBMED_EMAIL / PUBMED_API_KEY (e.g. in .env). Leave null here.
+  pubmed_email: null
+  pubmed_api_key: null
   max_concurrent_pubmed: 3
   max_concurrent_llm: 5
 
