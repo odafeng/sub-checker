@@ -21,6 +21,14 @@
 | **logic** | 矛盾、缺乏支持的主張、方法與結果不一致 |
 | **citation_claim** | 三源驗證（PubMed + Semantic Scholar + Crossref），再比對引用論文摘要與文中主張 |
 
+### v2 reliability guards
+
+- **有界 manuscript reads**：過大的 section／reference list 會在安全 context boundary
+  截斷，並產生明確的 partial-coverage notice，不會假裝已完整檢查。
+- **可過期的 persistent web cache**：journal guidelines 與搜尋結果預設重用 30 天，降低
+  latency 與重複請求；失敗的 fetch 不會被 cache。
+- **不需要 private corpus**：public tests 全部使用 generated 或 synthetic manuscripts。
+
 ## Demo
 
 🎥 **[看 60 秒 demo](docs/media/demo.mp4)** &nbsp;·&nbsp; [直式手機版](docs/media/demo-vertical.mp4)
@@ -166,6 +174,14 @@ Scholar/Crossref）。可在 `.sub-checker.yaml` 覆寫任一模型（如全部�
 - `cot/` — agent chain-of-thought JSON 日誌（每個 tool call、每個 response）
 
 在 `.sub-checker.yaml` 設定 `cot_dir: "disabled"` 可關閉 COT 檔案日誌（HTML 報告中仍可看到）。
+
+Public journal-guideline pages 與搜尋結果預設 cache 在
+`~/.cache/sub-checker/web.json` 30 天；可在 `.sub-checker.yaml` 調整或停用：
+
+```yaml
+web_cache_dir: "~/.cache/sub-checker"  # null 可停用 persistent web cache
+web_cache_max_age_days: 30
+```
 
 ## 架構
 

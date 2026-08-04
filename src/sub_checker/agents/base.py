@@ -22,6 +22,7 @@ from sub_checker.models import (
     Severity,
     TokenUsage,
 )
+from sub_checker.sizing import TRUNCATION_MARKER
 
 logger = logging.getLogger("sub_checker.agents")
 
@@ -78,6 +79,7 @@ class BaseCheckerAgent(ABC):
         self._findings: list[Finding] = []
         self._token_usage = TokenUsage()
         self._manuscript: Manuscript | None = None
+        self._tool_truncation_noted = False
 
     @cached_property
     def system_prompt(self) -> str:
@@ -185,6 +187,7 @@ class BaseCheckerAgent(ABC):
         self._manuscript = manuscript
         self._findings = []
         self._token_usage = TokenUsage()
+        self._tool_truncation_noted = False
         start = time.monotonic()
 
         run_id = uuid.uuid4().hex[:8]
@@ -325,6 +328,13 @@ class BaseCheckerAgent(ABC):
                                         exc_info=True,
                                     )
                                     cot.log_error(f"Tool '{block.name}' failed: {e}", e)
+
+                            if TRUNCATION_MARKER in result and not self._tool_truncation_noted:
+                                self._note_incomplete(
+                                    "Check coverage is partial: at least one manuscript tool "
+                                    "result exceeded the safe context budget and was truncated."
+                                )
+                                self._tool_truncation_noted = True
 
                             cot.log_tool_result(block.name, block.id, result)
                             tool_results.append(

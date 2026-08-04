@@ -440,6 +440,16 @@ def test_pubmed_credentials_none_without_env(monkeypatch):
     assert config.claim.pubmed_email is None
 
 
+def test_web_cache_can_be_disabled_or_resolved(tmp_path):
+    from sub_checker.config import Config
+
+    disabled = Config(web_cache_dir=None)
+    enabled = Config(web_cache_dir=str(tmp_path))
+
+    assert disabled.web_cache_path() is None
+    assert enabled.web_cache_path() == tmp_path / "web.json"
+
+
 # --- reviewer completeness: partial verdicts don't silently drop findings ---
 
 

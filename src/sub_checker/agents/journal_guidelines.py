@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from sub_checker.agents.base import ADD_FINDING_TOOL, BaseCheckerAgent
 from sub_checker.config import Config
 from sub_checker.models import Manuscript
@@ -27,6 +29,8 @@ class JournalGuidelinesAgent(BaseCheckerAgent):
     def __init__(self, model: str = "claude-opus-4-8"):
         super().__init__(model=model)
         self._web_service: WebService | None = None
+        self._web_cache_path: Path | None = None
+        self._web_cache_max_age_days = 30
 
     def _default_system_prompt(self) -> str:
         return (
@@ -93,16 +97,24 @@ class JournalGuidelinesAgent(BaseCheckerAgent):
         if tool_name == "list_figures":
             return list_figures(ms)
         if tool_name == "web_search":
-            ws = self._web_service or WebService()
+            ws = self._web_service or WebService(
+                cache_path=self._web_cache_path,
+                cache_max_age_days=self._web_cache_max_age_days,
+            )
             self._web_service = ws
             return await web_search(ws, tool_input["query"])
         if tool_name == "fetch_page":
-            ws = self._web_service or WebService()
+            ws = self._web_service or WebService(
+                cache_path=self._web_cache_path,
+                cache_max_age_days=self._web_cache_max_age_days,
+            )
             self._web_service = ws
             return await fetch_page(ws, tool_input["url"])
         return f"Unknown tool: {tool_name}"
 
     async def run(self, manuscript: Manuscript, config: Config):
+        self._web_cache_path = config.web_cache_path()
+        self._web_cache_max_age_days = config.web_cache_max_age_days
         try:
             return await super().run(manuscript, config)
         finally:

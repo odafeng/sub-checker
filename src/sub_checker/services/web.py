@@ -3,9 +3,16 @@
 from __future__ import annotations
 
 import re
+import time
+from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 import httpx
+
+from sub_checker.services.cache import DiskCache
+
+_SECONDS_PER_DAY = 86_400
 
 
 class WebService:
@@ -16,10 +23,44 @@ class WebService:
     URL fetching for known journal guidelines pages.
     """
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        cache_path: Path | None = None,
+        cache_max_age_days: int = 30,
+        now: Callable[[], float] = time.time,
+    ) -> None:
         self._page_cache: dict[str, str] = {}
         self._search_cache: dict[str, list[dict[str, Any]]] = {}
         self._client: httpx.AsyncClient | None = None
+        self._disk_cache = DiskCache(cache_path) if cache_path else None
+        self._cache_max_age_days = cache_max_age_days
+        self._now = now
+
+    def _get_persistent(self, bucket: str, key: str) -> Any | None:
+        if self._disk_cache is None:
+            return None
+        records = self._disk_cache.get(bucket, {})
+        if not isinstance(records, dict):
+            return None
+        record = records.get(key)
+        if not isinstance(record, dict):
+            return None
+        stored_at = record.get("stored_at")
+        if not isinstance(stored_at, (int, float)):
+            return None
+        if self._now() - stored_at > self._cache_max_age_days * _SECONDS_PER_DAY:
+            return None
+        return record.get("value")
+
+    def _put_persistent(self, bucket: str, key: str, value: Any) -> None:
+        if self._disk_cache is None:
+            return
+        records = self._disk_cache.get(bucket, {})
+        if not isinstance(records, dict):
+            records = {}
+        records[key] = {"stored_at": self._now(), "value": value}
+        self._disk_cache[bucket] = records
+        self._disk_cache.flush()
 
     async def _get_client(self) -> httpx.AsyncClient:
         if self._client is None:
@@ -38,6 +79,10 @@ class WebService:
         """
         if query in self._search_cache:
             return self._search_cache[query]
+        cached = self._get_persistent("search", query)
+        if isinstance(cached, list):
+            self._search_cache[query] = cached
+            return cached
 
         client = await self._get_client()
         try:
@@ -51,6 +96,8 @@ class WebService:
             results = []
 
         self._search_cache[query] = results
+        if results:
+            self._put_persistent("search", query, results)
         return results
 
     def _parse_ddg_html(self, html: str) -> list[dict[str, Any]]:
@@ -95,6 +142,10 @@ class WebService:
         """Fetch a URL and extract text content."""
         if url in self._page_cache:
             return self._page_cache[url]
+        cached = self._get_persistent("pages", url)
+        if isinstance(cached, str):
+            self._page_cache[url] = cached
+            return cached
 
         client = await self._get_client()
         try:
@@ -107,6 +158,7 @@ class WebService:
             return f"Error fetching {url}: {e}"
 
         self._page_cache[url] = text
+        self._put_persistent("pages", url, text)
         return text
 
     def _extract_text(self, html: str) -> str:

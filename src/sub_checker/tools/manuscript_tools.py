@@ -5,11 +5,13 @@ from __future__ import annotations
 import re
 
 from sub_checker.models import Manuscript
+from sub_checker.sizing import bounded_tool_text
 
 # Numbers ABOVE this are not plausible citation numbers \u2014 they are
 # years like (2023), page ranges like (1023-1045), or sample sizes.
 # (The boundary value itself is inclusive: [999] counts as a citation.)
 _MAX_CITATION_NUMBER = 999
+_MAX_TOOL_TEXT_CHARS = 40_000
 
 
 def extract_citation_numbers(raw_text: str, square_only: bool = False) -> set[int]:
@@ -108,7 +110,11 @@ def read_section(manuscript: Manuscript, section_name: str) -> str:
             if not section.paragraphs:
                 return f"Section '{section.heading}' has no paragraphs."
             text = "\n\n".join(p.text for p in section.paragraphs)
-            return f"## {section.heading}\n\n{text}"
+            return bounded_tool_text(
+                f"## {section.heading}\n\n{text}",
+                label=f"section {section.heading!r}",
+                max_chars=_MAX_TOOL_TEXT_CHARS,
+            )
     available = [s.heading for s in manuscript.sections]
     return f"Section '{section_name}' not found. Available sections: {available}"
 
@@ -125,14 +131,16 @@ def read_paragraph(manuscript: Manuscript, index: int) -> str:
 def read_manuscript_header(manuscript: Manuscript) -> str:
     """Return raw text before the first heading (title, authors, abstract, etc.)."""
     if manuscript.header_text:
-        return (
+        return bounded_tool_text(
             "--- Raw document header (text before first heading) ---\n"
             f"{manuscript.header_text}\n"
             "--- End of header ---\n"
             "NOTE: This is the raw text at the start of the .docx file, before any "
             "heading-styled paragraph. It typically contains the title, author list, "
             "affiliations, and sometimes the abstract. Use this to determine the "
-            "manuscript title and author information."
+            "manuscript title and author information.",
+            label="document header",
+            max_chars=_MAX_TOOL_TEXT_CHARS,
         )
     return "No text found before the first heading in the document."
 
@@ -140,13 +148,15 @@ def read_manuscript_header(manuscript: Manuscript) -> str:
 def get_reference_list(manuscript: Manuscript) -> str:
     """Get the reference list section."""
     if manuscript.reference_section:
-        return (
+        return bounded_tool_text(
             f"{manuscript.reference_section}\n\n"
             "NOTE: Reference list numbering may be missing above if the original "
             ".docx uses Word auto-numbered lists — the numbers are stored as list "
             "formatting metadata and are stripped during text extraction. Do NOT "
             "report missing numbering as an error. Assume references are numbered "
-            "sequentially (1, 2, 3, ...) in the order they appear."
+            "sequentially (1, 2, 3, ...) in the order they appear.",
+            label="reference list",
+            max_chars=_MAX_TOOL_TEXT_CHARS,
         )
     return "No reference section found in the manuscript."
 

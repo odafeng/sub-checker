@@ -48,6 +48,8 @@ class Config(BaseModel):
     cot_dir: str | None = (
         None  # COT log directory. None = default (~/.sub-checker/cot). "disabled" = no COT.
     )
+    web_cache_dir: str | None = "~/.cache/sub-checker"
+    web_cache_max_age_days: int = 30
     figures: FigureConfig = Field(default_factory=FigureConfig)
     claim: ClaimConfig = Field(default_factory=ClaimConfig)
     custom_dictionary: list[str] = Field(default_factory=list)
@@ -55,6 +57,12 @@ class Config(BaseModel):
     def model_for(self, checker_name: str) -> str:
         """Resolve the model to use for a given checker."""
         return self.models.get(checker_name) or self.model
+
+    def web_cache_path(self) -> Path | None:
+        """Resolve the optional persistent cache for public web pages and searches."""
+        if self.web_cache_dir is None:
+            return None
+        return Path(self.web_cache_dir).expanduser() / "web.json"
 
 
 def load_config(config_path: Path | None = None) -> Config:
@@ -103,6 +111,11 @@ reviewer_model: null
 
 # How many checker agents may run concurrently
 max_concurrent_agents: 3
+
+# Cache public journal-guideline pages/search results to reduce repeated network
+# calls. Set web_cache_dir: null to disable persistence.
+web_cache_dir: "~/.cache/sub-checker"
+web_cache_max_age_days: 30
 
 # Figure/Table checker
 figures:

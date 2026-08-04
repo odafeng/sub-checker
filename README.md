@@ -21,6 +21,15 @@ Pre-submission manuscript checker powered by Claude agents with a Plan-Execute-V
 | **logic** | Contradictions, unsupported claims, methods-results mismatches |
 | **citation_claim** | Multi-source verification (PubMed + Semantic Scholar + Crossref), then verifies claims against abstracts |
 
+### v2 reliability guards
+
+- **Bounded manuscript reads**: oversized sections and reference lists stop at a safe context
+  boundary and produce an explicit partial-coverage notice. They are never silently treated as a
+  complete check.
+- **Persistent, expiring web cache**: public journal-guideline pages and search results are reused
+  for 30 days, reducing latency and repeated requests without caching failed fetches.
+- **No private corpus required**: all public tests use generated or synthetic manuscripts.
+
 ## Demo
 
 🎥 **[Watch the 60-second demo](docs/media/demo.mp4)** &nbsp;·&nbsp; [vertical version for mobile](docs/media/demo-vertical.mp4)
@@ -167,6 +176,14 @@ All logs are stored in `~/.sub-checker/`:
 - `cot/` — agent chain-of-thought JSON logs (every tool call, every response)
 
 Set `cot_dir: "disabled"` in `.sub-checker.yaml` to turn off COT file logging (entries still appear in HTML reports).
+
+Public journal-guideline pages and search results are cached in
+`~/.cache/sub-checker/web.json` for 30 days. Configure or disable this in `.sub-checker.yaml`:
+
+```yaml
+web_cache_dir: "~/.cache/sub-checker"  # null disables persistent web caching
+web_cache_max_age_days: 30
+```
 
 ## Architecture
 
